@@ -10,6 +10,7 @@ path = Path(__file__)
 DATA_CACHE_DIR = path.parent.absolute() / "data"
 
 # This is adapated from github/llama2.c/tinystories.py
+# https://github.com/karpathy/llama2.c/blob/master/tinystories.py
 
 
 def download_file(url: str, fname: str, chunk_size=1024):
