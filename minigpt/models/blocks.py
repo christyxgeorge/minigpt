@@ -5,7 +5,7 @@ from torch.nn import functional as F
 
 
 class AttentionHead(nn.Module):
-    """Single Attention head"""
+    """Single Attention head With a specific head size"""
 
     def __init__(self, cfg, head_size):
         super().__init__()
@@ -31,7 +31,7 @@ class AttentionHead(nn.Module):
 
 
 class AttentionHeadDropout(nn.Module):
-    """Single Attention head"""
+    """Single Attention head - with Dropout"""
 
     def __init__(self, cfg, head_size):
         super().__init__()
@@ -103,27 +103,70 @@ class MultiHeadAttentionDropOut(nn.Module):
     def forward(self, x):
         # Concatenate on the `channel` dimension
         out = torch.cat([h(x) for h in self.heads], dim=-1)
-        out = self.proj(out)
+        out = self.dropout(self.proj(out))
         return out
 
 
 class MultiHeadAttentionParallel(nn.Module):
-    """Multiple Attention heads running in parallel - And with projection, dropout"""
+    """Multiple Attention heads - with Dropout - In parallel (split/combine)"""
 
     def __init__(self, cfg):
         super().__init__()
-        head_size = cfg.n_embed // cfg.n_heads
-        self.heads = nn.ModuleList(
-            [AttentionHeadDropout(cfg, head_size) for _ in range(cfg.n_heads)]
-        )
+        self.key = nn.Linear(cfg.n_embed, cfg.n_embed, bias=False)
+        self.query = nn.Linear(cfg.n_embed, cfg.n_embed, bias=False)
+        self.value = nn.Linear(cfg.n_embed, cfg.n_embed, bias=False)
+        self.att_dropout = nn.Dropout(cfg.dropout)
+        self.residual_dropout = nn.Dropout(cfg.dropout)
+
         self.proj = nn.Linear(cfg.n_embed, cfg.n_embed)
-        self.dropout = nn.Dropout(cfg.dropout)
+
+        # Local Variables
+        self.flash = False  # hasattr(torch.nn.functional, "scaled_dot_product_attention")
+        self.head_size = cfg.n_embed // cfg.n_heads
+        self.num_heads = cfg.n_heads
+        self.cfg = cfg
+
+        if not self.flash:
+            self.register_buffer(
+                "tril",
+                torch.tril(torch.ones(cfg.block_size, cfg.block_size)).view(
+                    1, 1, cfg.block_size, cfg.block_size
+                ),
+            )  ## T x T
+
+    def split_heads(self, x):
+        # Reshape the input to have num_heads for multi-head attention
+        B, T, _ = x.size()  # batch_size, seq_length, d_model
+        return x.view(B, T, self.num_heads, self.head_size).transpose(1, 2)
+
+    def combine_heads(self, x):
+        # Combine the multiple heads back to original shape
+        B, _, T, _ = x.size()
+        return x.transpose(1, 2).contiguous().view(B, T, self.cfg.n_embed)
 
     def forward(self, x):
-        # Concatenate on the `channel` dimension
-        out = torch.cat([h(x) for h in self.heads], dim=-1)
-        out = self.proj(out)
-        return out
+        _, T, C = x.shape
+        k = self.split_heads(self.key(x))  # B x num_heads x T x head_size (hs)
+        q = self.split_heads(self.query(x))  # B x num_heads x T x head_size (hs)
+
+        if self.flash:
+            out = torch.nn.functional.scaled_dot_product_attention(
+                q,
+                k,
+                v,
+                attn_mask=None,
+                dropout_p=self.cfg.dropout if self.training else 0,
+                is_causal=True,
+            )
+        else:
+            att = q @ k.transpose(-2, -1) * C**-0.5  # Scaled attention
+            att = att.masked_fill(self.tril[:, :, :T, :T] == 0, float("-inf"))
+            att = F.softmax(att, dim=-1)
+            att = self.att_dropout(att)
+            v = self.split_heads(self.value(x))  # B x num_heads x T x head_size (hs)
+            out = att @ v
+        out = self.combine_heads(out)
+        return self.residual_dropout(self.proj(out))
 
 
 class FeedForward(nn.Module):
@@ -217,9 +260,31 @@ class ResidualTransformerBlockDropout(nn.Module):
 
     def forward(self, x):
         # Apply the attention heads on the pre-norm'ed `x`
-        x = x + self.sa(self.ln1(x) if self.ln1 else x)
+        x = x + self.sa(self.ln1(x))
         # B x T x C # Positional feed-forward on the pre-norm'ed `x`
-        x = x + self.ffwd(self.ln2(x) if self.ln2 else x)
+        x = x + self.ffwd(self.ln2(x))
+        return x
+
+
+class ResidualTransformerBlockParallel(nn.Module):
+    """Transformer Block: Communication followed by Computation - With Residual Connections"""
+
+    """The layer norm we apply is called pre-norm. Slighly different from the original paper"""
+
+    def __init__(self, cfg):
+        super().__init__()
+        self.sa = MultiHeadAttentionParallel(cfg)
+        self.ffwd = FeedForwardDropout(cfg)
+        # Although we implemented the layer norm below, we use the torch version of it!
+        # Normalize each token. (mean of the `n_embed` channels)
+        self.ln1 = nn.LayerNorm(cfg.n_embed)
+        self.ln2 = nn.LayerNorm(cfg.n_embed)
+
+    def forward(self, x):
+        # Apply the attention heads on the pre-norm'ed `x`
+        x = x + self.sa(self.ln1(x))
+        # B x T x C # Positional feed-forward on the pre-norm'ed `x`
+        x = x + self.ffwd(self.ln2(x))
         return x
 
 
@@ -278,3 +343,15 @@ class LayerNorm1D:
 
     def parameters(self):
         return [self.gamma, self.beta]
+
+
+class LayerNorm(nn.Module):
+    """LayerNorm but with an optional bias. PyTorch doesn't support simply bias=False"""
+
+    def __init__(self, ndim, bias):
+        super().__init__()
+        self.weight = nn.Parameter(torch.ones(ndim))
+        self.bias = nn.Parameter(torch.zeros(ndim)) if bias else None
+
+    def forward(self, input):
+        return F.layer_norm(input, self.weight.shape, self.weight, self.bias, 1e-5)

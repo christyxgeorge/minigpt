@@ -9,19 +9,19 @@ from .model_base import LanguageModelBase
 
 class GPTLanguageModelv1(LanguageModelBase):
     def __init__(self, cfg):
-        super().__init__()
+        super().__init__(cfg)
         # Each token gets the logits for the next token from the lookup table
         self.token_embedding_table = nn.Embedding(cfg.vocab_size, cfg.n_embed)
         self.position_embedding_table = nn.Embedding(cfg.block_size, cfg.n_embed)
         self.sa_head = AttentionHead(cfg, cfg.n_embed // 2)
         self.lm_head = nn.Linear(cfg.n_embed // 2, cfg.vocab_size)
 
-    def forward(self, device, idx, targets=None):
+    def forward(self, idx, targets=None):
         # idx, targets --> B x T (batch_size x block_size)
         B, T = idx.shape
         token_embedding = self.token_embedding_table(idx)  # B x T x C (n_embed)
         position_embedding = self.position_embedding_table(
-            torch.arange(T, device=device)
+            torch.arange(T, device=self.cfg.device)
         )  # (T x C)
 
         ## B x T x C (position_embedding gets broadcasted for each batch)

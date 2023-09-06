@@ -51,3 +51,4 @@ if __name__ == "__main__":
     set_env(args.verbose)
     trainer = GPTTrainer(args)
     trainer.train()
+    trainer.generate()

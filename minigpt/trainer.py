@@ -23,28 +23,32 @@ class GPTTrainer:
         self.model = self.cfg.get_model(self.tdata)
 
     @torch.no_grad()
-    def print_estimate_loss(self, iter, elapsed_time=None):
+    def print_estimate_loss(self, iter, eval_start_time=None):
         xlosses = {}
         ### Put in `inference` mode [Not needed in our case, no different behaviour for our model!]
         self.model.eval()
+        eval_elapsed_time = time.time() - eval_start_time if eval_start_time else None
+        est_start_time = time.time()
         for split in ["train", "val"]:
             losses = torch.zeros(self.cfg.eval_iters)
             for k in range(self.cfg.eval_iters):
                 X, Y = self.get_batch(split)
-                _logits, loss = self.model(self.cfg.device, X, Y)
+                _logits, loss = self.model(X, Y)
                 losses[k] = loss.item()
             xlosses[split] = losses.mean().item()
             self.model.train()
 
-        if not elapsed_time:
+        if not eval_start_time:
             elapsed_str = ""
         else:
-            elapsed_str = f", elapsed time = {elapsed_time:.2f} secs"
+            estimation_time = time.time() - est_start_time
+            elapsed_str = f", elapsed time = {eval_elapsed_time:.2f} secs, est time = {estimation_time:.2f} secs"
         logger.info(
             f"step {iter:4d}: train loss = {xlosses['train']}, val loss = {xlosses['val']}{elapsed_str}"
         )
-        if elapsed_time:
-            xlosses["eval_time"] = elapsed_time
+        if eval_start_time:
+            xlosses["eval_time"] = eval_elapsed_time
+            xlosses["est_time"] = estimation_time
         wandb.log(xlosses)
         return xlosses
 
@@ -77,8 +81,10 @@ class GPTTrainer:
             tags=[self.cfg.model_name()],
         )
 
-        print(f"Training: Model = {self.model.__class__.__name__}")
-        print(f"Hyperparameters: {self.cfg.dict()}")
+        print(
+            f"Training: Model = {self.model.__class__.__name__}, Parameter Count: {self.model.get_num_params()}"
+        )
+        print(f"Model Config: {self.cfg.dict()}")
         print("================================================================")
         logger.info("training starts")
         self.print_estimate_loss(0)  # Print Initial Losses!
@@ -90,13 +96,12 @@ class GPTTrainer:
         eval_start_time = time.time()
         for step in range(self.cfg.max_iters):  ## `n` steps
             if step and step % self.cfg.eval_interval == 0:
-                eval_elapsed_time = time.time() - eval_start_time
+                self.print_estimate_loss(step, eval_start_time)
                 eval_start_time = time.time()
-                self.print_estimate_loss(step, eval_elapsed_time)
 
             xb, yb = self.get_batch("train")  ## xb = B x T
             # print(f"Shapes: {xb.shape} / {yb.shape}")
-            logits, loss = self.model(self.cfg.device, xb, yb)
+            logits, loss = self.model(xb, yb)
             ## Zero out existing gradients computed for previous step
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
@@ -112,10 +117,11 @@ class GPTTrainer:
             mins = int(elapsed_time // 60)
             secs = elapsed_time % 60
             print(f"Time taken = {elapsed_time:.3f} secs - {mins} mins, {secs:.3f} secs")
-        print(f"Hyperparameters: {self.cfg.dict()}")
+        print(f"Model Config: {self.cfg.dict()}")
         print(f"Losses: {losses}")
 
         wandb.finish()
 
+    def generate(self):
         # Generate Text
-        self.tdata.generate_text(self.model, self.cfg)
+        self.model.generate_text(self.tdata, self.cfg)

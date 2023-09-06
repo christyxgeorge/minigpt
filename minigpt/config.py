@@ -11,6 +11,7 @@ from minigpt.models import (
     GPTLanguageModelv4,
     GPTLanguageModelv5,
     GPTLanguageModelv6,
+    GPTLanguageModelv7,
 )
 from minigpt.models.bigram import BigramLanguageModel
 
@@ -21,6 +22,7 @@ MODELS = {
     4: GPTLanguageModelv4,
     5: GPTLanguageModelv5,
     6: GPTLanguageModelv6,
+    7: GPTLanguageModelv7,
 }
 
 
