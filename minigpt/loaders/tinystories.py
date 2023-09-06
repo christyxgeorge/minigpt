@@ -9,6 +9,8 @@ from tqdm import tqdm
 path = Path(__file__)
 DATA_CACHE_DIR = path.parent.absolute() / "data"
 
+# This is adapated from github/llama2.c/tinystories.py
+
 
 def download_file(url: str, fname: str, chunk_size=1024):
     """Helper function to download a file from a given url"""
