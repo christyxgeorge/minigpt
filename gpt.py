@@ -71,9 +71,17 @@ if __name__ == "__main__":
     root_dir = path.parent.absolute()
 
     if command == "train":
-        trainer = GPTTrainer(root_dir, args)
+        trainer = GPTTrainer(root_dir, root_dir, args)
         trainer.train()
         trainer.generate()
     else:
-        generator = GPTGenerator(root_dir, args)
+        generator = GPTGenerator(root_dir, root_dir, args)
         generator.generate()
+
+
+## ========================================================================================
+## Pending things
+## 1. Learning Decay
+## 2. Resume learning
+## 3. GPT2 weights
+## ========================================================================================

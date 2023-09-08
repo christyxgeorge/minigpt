@@ -6,8 +6,22 @@ To fix this, we need to add residual connections
 import torch
 import torch.nn as nn
 
-from .blocks import TransformerBlock
+from .blocks import FeedForward, MultiHeadAttention
 from .model_base import LanguageModelBase
+
+
+class TransformerBlock(nn.Module):
+    """Transformer Block: Communication followed by Computation"""
+
+    def __init__(self, cfg):
+        super().__init__()
+        self.sa = MultiHeadAttention(cfg)
+        self.ffwd = FeedForward(cfg)
+
+    def forward(self, x):
+        x = self.sa(x)  # Apply the attention heads
+        x = self.ffwd(x)  # B x T x C # Positional feed-forward
+        return x
 
 
 class GPTLanguageModelv4(LanguageModelBase):

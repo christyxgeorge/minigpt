@@ -22,6 +22,10 @@ class LanguageModelBase(nn.Module):
     def name(self) -> str:
         return self.__class__.__name__.lower()
 
+    @property
+    def device(self):
+        return next(self.parameters()).device
+
     def get_num_params(self, non_embedding=True):
         """
         Return the number of parameters in the model.

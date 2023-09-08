@@ -1,7 +1,9 @@
 """"Hyperparameters"""
+import hashlib
+import json
 import os
 from dataclasses import asdict, dataclass
-from typing import Literal
+from datetime import datetime
 
 import torch
 import torch.nn as nn
@@ -42,19 +44,61 @@ class ModelConfig:
     learning_rate: float = 1e-3
     dropout: float = 0.2
 
-    device: str = "cpu"
+    gradient_accumulation_steps: int = 5 * 8  # used to simulate larger batch sizes
+
+    # optimizer settings
+    weight_decay: float = 1e-1
+    beta1: float = 0.9
+    beta2: float = 0.95
+    grad_clip: float = 1.0  # clip gradients at this value, or disable if == 0.0
+
+    # learning rate decay settings
+    decay_lr: bool = False  # whether to decay the learning rate
+    warmup_iters: int = 2000  # how many steps to warm up for
+    lr_decay_iters: int = 600000  # should be ~= max_iters per Chinchilla
+    min_lr: float = 6e-5  # minimum learning rate, should be ~= learning_rate/10 per Chinchilla
+
+    compile: bool = False  ## use PyTorch 2.0 to compile the model to be faster
+    device_type: str = "cpu"
+    device = None
+    ddp_device = "gloo"  ## "xla" for TPU, "nccl" for CUDA, "gloo" for CPU
+
     eval_interval: int = 200
     eval_iters: int = 200
 
     verbose: bool = False
-    source: str = "s_char"  ## Text Source
+    source: str = "s_char"  ## Text Source 's_char', 's_word', 't_stories'
+    wandb_log: bool = False
 
     def __post_init__(self):
         # Setup Device and Evaluation Parameters
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        if self.device == "cpu":
+        self.device_type = "cuda" if torch.cuda.is_available() else "cpu"
+        self.device = torch.device(self.device_type)
+        self.ddp_device = "nccl" if torch.cuda.is_available() else "gloo"
+        if self.device_type == "cpu":
             os.environ["OMP_NUM_THREADS"] = "6"
-        print(torch.__config__.parallel_info())
+            print(torch.__config__.parallel_info())
+        elif self.device_type == "cuda":
+            # torch.cuda.device(0) # -> <torch.cuda.device at 0x7efce0b03be0>
+            print("CUDA Devices Info:")
+            num_devices = torch.cuda.device_count()
+            print(f"  Count: {num_devices}")
+            print(f"  Current Device = {torch.cuda.current_device()}")
+            print(f"  bfloat16 supported: {torch.cuda.is_bf16_supported()}")
+            for device_id in range(num_devices):
+                print(f"  Device Name[{device_id}]: {torch.cuda.get_device_name(device_id)}")
+            print("Memory Usage:")
+            for device_id in range(num_devices):
+                print(
+                    f"  Allocated[{device_id}]:",
+                    round(torch.cuda.memory_allocated(device_id) / 1024**3, 1),
+                    "GB",
+                )
+                print(
+                    f"  Cached[{device_id}]:   ",
+                    round(torch.cuda.memory_reserved(device_id) / 1024**3, 1),
+                    "GB",
+                )
 
     @property
     def model_name(self) -> str:
@@ -69,22 +113,30 @@ class ModelConfig:
         model_cls = MODELS.get(self.model_id, BigramLanguageModel)
         model_params = {"cfg": self}
         m = model_cls(**model_params)
-        return m
+        return m.to(self.device)
 
     @staticmethod
     def modelname_fromid(model_id):
         return MODELS.get(model_id, BigramLanguageModel).__name__
 
     @staticmethod
-    def default_device() -> Literal["cuda", "cpu"]:
-        return "cuda" if torch.cuda.is_available() else "cpu"
+    def default_device():
+        return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     def __repr__(self):
-        return f"{self.device}|{self.model_name.lower()}|{self.source.lower()}"
+        overwrite = True
+        if overwrite:
+            # Create ID for a specific model/source/config
+            hash = hashlib.md5(
+                json.dumps(self.dict(), sort_keys=True).encode("utf-8")
+            ).hexdigest()  # nosec
+            return f"{self.device}|{self.model_name.lower()}|{self.source.lower()}|{hash}"
+        # Create ID for each run... So that there
+        return f"{self.device}|{self.model_id}|{datetime.now().isoformat().replace(':', '.')}"
 
 
 # ------------------------------------------------------------
-# Hyper-paramaeters -- v6 (Will definitely require GPU/TPU)
+# Final Hyper-paramaeters (Will definitely require GPU/TPU)
 # ------------------------------------------------------------
 # batch_size = 64  ## Number of independent sequences processed in parallel
 # block_size = 256  ## Context Length for the prediction

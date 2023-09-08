@@ -27,15 +27,15 @@ class TextDataBase(ABC):
         """decode a list of integers back to a string"""
 
     @classmethod
-    def get_loader(cls, type, verbose=False) -> TextDataBase | None:
+    def get_loader(cls, type, root_dir, verbose=False) -> TextDataBase | None:
         if type == "s_char":
             from .shakespeare_char import CharDataTinyShakespeare
 
-            return CharDataTinyShakespeare(verbose=verbose)
+            return CharDataTinyShakespeare(root_dir, verbose=verbose)
         elif type == "s_word":
             from .shakespeare_subword import TextDataTinyShakespeare
 
-            return TextDataTinyShakespeare(verbose=verbose)
+            return TextDataTinyShakespeare(root_dir, verbose=verbose)
         else:
             print(f"Unknown TextData Type: {type}")
             raise ValueError(f"Unknown TextData Type: {type} - Should be `s_char` or `s_word`")

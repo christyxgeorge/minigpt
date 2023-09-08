@@ -7,8 +7,8 @@ from minigpt.loaders.base import TextDataBase
 
 
 class TextDataTinyShakespeare(TextDataBase):
-    def __init__(self, verbose=False):
-        super().__init__("data/tiny_shakespeare.txt", verbose=verbose)
+    def __init__(self, root_dir, verbose=False):
+        super().__init__(root_dir, f"{root_dir}/data/tiny_shakespeare.txt", verbose=verbose)
         self.load_data()
 
     def load_data(self):
