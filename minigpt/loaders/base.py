@@ -8,9 +8,11 @@ class TextDataBase(ABC):
     """class for keeping text data"""
 
     filename: str
+    verbose: bool = False
 
-    def __init__(self, filename):
+    def __init__(self, filename, verbose=False):
         self.filename = filename
+        self.verbose = verbose
 
     @abstractmethod
     def load_data(self):
@@ -25,11 +27,15 @@ class TextDataBase(ABC):
         """decode a list of integers back to a string"""
 
     @classmethod
-    def get_loader(cls, type) -> TextDataBase | None:
-        if type == "shakespeare_char":
-            from .shakespeare_char import TextDataTinyShakespeare
+    def get_loader(cls, type, verbose=False) -> TextDataBase | None:
+        if type == "s_char":
+            from .shakespeare_char import CharDataTinyShakespeare
 
-            return TextDataTinyShakespeare()
+            return CharDataTinyShakespeare(verbose=verbose)
+        elif type == "s_word":
+            from .shakespeare_subword import TextDataTinyShakespeare
+
+            return TextDataTinyShakespeare(verbose=verbose)
         else:
-            print("Unknown Data Type: {type}")
-            return None
+            print(f"Unknown TextData Type: {type}")
+            raise ValueError(f"Unknown TextData Type: {type} - Should be `s_char` or `s_word`")

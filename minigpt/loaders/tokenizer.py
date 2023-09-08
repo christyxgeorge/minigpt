@@ -15,7 +15,7 @@ TOKENIZER_MODEL = "tokenizer.model"  # the llama sentencepiece tokenizer model
 class Tokenizer:
     def __init__(self, tokenizer_model: str | None = None):
         model_path = tokenizer_model if tokenizer_model else TOKENIZER_MODEL
-        assert os.path.isfile(model_path), model_path
+        assert os.path.isfile(model_path), model_path  # nosec
         self.sp_model = SentencePieceProcessor(model_file=model_path)
         self.model_path = model_path
 
@@ -25,10 +25,10 @@ class Tokenizer:
         self.eos_id: int = self.sp_model.eos_id()
         self.pad_id: int = self.sp_model.pad_id()
         # print(f"#words: {self.n_words} - BOS ID: {self.bos_id} - EOS ID: {self.eos_id}")
-        assert self.sp_model.vocab_size() == self.sp_model.get_piece_size()
+        assert self.sp_model.vocab_size() == self.sp_model.get_piece_size()  # nosec
 
     def encode(self, s: str, bos: bool, eos: bool) -> List[int]:
-        assert type(s) is str
+        assert type(s) is str  # nosec
         t = self.sp_model.encode(s)
         if bos:
             t = [self.bos_id] + t

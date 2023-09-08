@@ -107,6 +107,22 @@ class MultiHeadAttentionDropOut(nn.Module):
         return out
 
 
+class MLP(nn.Module):
+    def __init__(self, cfg):
+        super().__init__()
+        self.c_fc = nn.Linear(cfg.n_embed, 4 * cfg.n_embed, bias=True)  # cfg.bias)
+        self.gelu = nn.GELU()
+        self.c_proj = nn.Linear(4 * cfg.n_embed, cfg.n_embed, bias=True)  # cfg.bias)
+        self.dropout = nn.Dropout(cfg.dropout)
+
+    def forward(self, x):
+        x = self.c_fc(x)
+        x = self.gelu(x)
+        x = self.c_proj(x)
+        x = self.dropout(x)
+        return x
+
+
 class MultiHeadAttentionParallel(nn.Module):
     """Multiple Attention heads - with Dropout - In parallel (split/combine)"""
 

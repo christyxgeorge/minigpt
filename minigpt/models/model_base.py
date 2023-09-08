@@ -18,6 +18,10 @@ class LanguageModelBase(nn.Module):
         super().__init__()
         self.cfg = cfg
 
+    @property
+    def name(self) -> str:
+        return self.__class__.__name__.lower()
+
     def get_num_params(self, non_embedding=True):
         """
         Return the number of parameters in the model.
@@ -94,7 +98,7 @@ class LanguageModelBase(nn.Module):
 
     def generate_text(self, tdata, cfg, num_tokens=200):
         print("==================================================================")
-        print("  Generating Text...")
+        print(f"  Generating Text [{num_tokens} tokens]")
         print("==================================================================")
         ## Create the initial 'text' to generate the continuation --> Using 0 = \n
         idx = torch.zeros((1, 1), dtype=torch.long, device=cfg.device)

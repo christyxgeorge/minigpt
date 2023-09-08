@@ -2,6 +2,7 @@
 
 import json
 import logging
+import os
 import time
 
 import torch
@@ -14,13 +15,15 @@ logger = logging.getLogger(__name__)
 
 
 class GPTTrainer:
-    def __init__(self, args):
+    def __init__(self, root_dir, args):
         """Data Loading and Hyperparameters"""
         # Setup the manual Seed to ensure reproducability
         torch.manual_seed(1337)
-        self.tdata = TextDataBase.get_loader("shakespeare_char")
+        self.root_dir = root_dir
+        self.verbose = args.verbose
+        self.tdata = TextDataBase.get_loader(args.source, verbose=self.verbose)
         self.cfg = ModelConfig(**vars(args), vocab_size=self.tdata.vocab_size)
-        self.model = self.cfg.get_model(self.tdata)
+        self.model = self.cfg.get_model()
 
     @torch.no_grad()
     def print_estimate_loss(self, iter, eval_start_time=None):
@@ -38,11 +41,12 @@ class GPTTrainer:
             xlosses[split] = losses.mean().item()
             self.model.train()
 
+        estimation_time = time.time() - est_start_time
         if not eval_start_time:
-            elapsed_str = ""
+            elapsed_str = f", est time = {estimation_time:.2f} secs"
         else:
-            estimation_time = time.time() - est_start_time
-            elapsed_str = f", elapsed time = {eval_elapsed_time:.2f} secs, est time = {estimation_time:.2f} secs"
+            total_secs = eval_elapsed_time + estimation_time
+            elapsed_str = f", elapsed time = {eval_elapsed_time:.2f} secs, est time = {estimation_time:.2f} secs [{total_secs:2f}]"
         logger.info(
             f"step {iter:4d}: train loss = {xlosses['train']}, val loss = {xlosses['val']}{elapsed_str}"
         )
@@ -65,6 +69,19 @@ class GPTTrainer:
         x, y = x.to(self.cfg.device), y.to(self.cfg.device)
         return x, y
 
+    def save_model(self, iter, optimizer, val_loss):
+        checkpoint = {
+            "model": self.model.state_dict(),
+            "optimizer": optimizer.state_dict(),
+            "iter_num": iter,
+            "best_val_loss": val_loss,
+            "config": self.cfg,
+        }
+        out_dir = self.root_dir / "checkpoints" / self.cfg.source
+        logger.info(f"Saving model checkpoint to {out_dir}")
+        out_dir.mkdir(parents=True, exist_ok=True)  # Create, if not exists.
+        torch.save(checkpoint, os.path.join(out_dir, f"{self.model.name}.ckpt.pt"))
+
     def train(self):
         """Run Loop"""
         # use AdamW instead of torch.optim.SGD
@@ -78,7 +95,7 @@ class GPTTrainer:
             # starting_step=0,
             # resumed=False,
             config=self.cfg.dict(),  # track hyperparameters and run metadata
-            tags=[self.cfg.model_name()],
+            tags=[self.cfg.model_name],
         )
 
         print(
@@ -121,7 +138,39 @@ class GPTTrainer:
         print(f"Losses: {losses}")
 
         wandb.finish()
+        self.save_model(step + 1, optimizer, losses["val"])
 
     def generate(self):
         # Generate Text
         self.model.generate_text(self.tdata, self.cfg)
+
+
+class GPTGenerator:
+    def __init__(self, root_dir, args):
+        torch.manual_seed(1337)
+        self.root_dir = root_dir
+        self.num_tokens = args.tokens
+        self.verbose = args.verbose
+        self.tdata = TextDataBase.get_loader(args.source, verbose=False)
+        checkpoint = self.load_checkpoint(args.model_id, args.source)
+        self.cfg = checkpoint["config"]
+        state_dict = checkpoint["model"]
+        unwanted_prefix = "_orig_mod."
+        for k, _v in list(state_dict.items()):
+            if k.startswith(unwanted_prefix):
+                state_dict[k[len(unwanted_prefix) :]] = state_dict.pop(k)
+
+        self.model = self.cfg.get_model()
+        self.model.load_state_dict(state_dict)
+
+    def load_checkpoint(self, model_id, source):
+        out_dir = self.root_dir / "checkpoints" / source
+        model_name = ModelConfig.modelname_fromid(model_id)
+        ckpt_path = os.path.join(out_dir, f"{model_name}.ckpt.pt")
+        device = ModelConfig.default_device()
+        checkpoint = torch.load(ckpt_path, map_location=device)
+        return checkpoint
+
+    def generate(self):
+        # Generate Text
+        self.model.generate_text(self.tdata, self.cfg, num_tokens=self.num_tokens)

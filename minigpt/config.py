@@ -1,6 +1,7 @@
 """"Hyperparameters"""
+import os
 from dataclasses import asdict, dataclass
-from datetime import datetime
+from typing import Literal
 
 import torch
 import torch.nn as nn
@@ -46,27 +47,40 @@ class ModelConfig:
     eval_iters: int = 200
 
     verbose: bool = False
+    source: str = "s_char"  ## Text Source
 
     def __post_init__(self):
         # Setup Device and Evaluation Parameters
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        if self.device == "cpu":
+            os.environ["OMP_NUM_THREADS"] = "6"
+        print(torch.__config__.parallel_info())
+
+    @property
+    def model_name(self) -> str:
+        return MODELS.get(self.model_id, BigramLanguageModel).__name__
 
     def dict(self):
         x = {k: str(v) for k, v in asdict(self).items()}
-        x["model_name"] = self.model_name()
+        x["model_name"] = self.model_name
         return x
 
-    def get_model(self, tdata) -> nn.Module:
+    def get_model(self) -> nn.Module:
         model_cls = MODELS.get(self.model_id, BigramLanguageModel)
         model_params = {"cfg": self}
         m = model_cls(**model_params)
         return m
 
-    def model_name(self):
-        return MODELS.get(self.model_id, BigramLanguageModel).__name__
+    @staticmethod
+    def modelname_fromid(model_id):
+        return MODELS.get(model_id, BigramLanguageModel).__name__
+
+    @staticmethod
+    def default_device() -> Literal["cuda", "cpu"]:
+        return "cuda" if torch.cuda.is_available() else "cpu"
 
     def __repr__(self):
-        return f"{self.device}|{self.model_id}|{datetime.now().isoformat().replace(':', '.')}"
+        return f"{self.device}|{self.model_name.lower()}|{self.source.lower()}"
 
 
 # ------------------------------------------------------------
