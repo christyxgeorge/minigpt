@@ -3,6 +3,7 @@ GPT Language Model v7: Compute the Multiple heads in parallel
 """
 import torch
 import torch.nn as nn
+from torch.nn import functional as F
 
 from .blocks import FeedForwardDropout
 from .model_base import LanguageModelBase

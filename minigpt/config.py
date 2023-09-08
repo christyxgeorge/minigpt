@@ -5,6 +5,7 @@ import os
 from dataclasses import asdict, dataclass
 from datetime import datetime
 
+import psutil
 import torch
 import torch.nn as nn
 from minigpt.models import (
@@ -76,33 +77,22 @@ class ModelConfig:
         self.device = torch.device(self.device_type)
         self.ddp_device = "nccl" if torch.cuda.is_available() else "gloo"
         if self.device_type == "cpu":
-            os.environ["OMP_NUM_THREADS"] = "6"
-            print(torch.__config__.parallel_info())
-        elif self.device_type == "cuda":
-            # torch.cuda.device(0) # -> <torch.cuda.device at 0x7efce0b03be0>
-            print("CUDA Devices Info:")
-            num_devices = torch.cuda.device_count()
-            print(f"  Count: {num_devices}")
-            print(f"  Current Device = {torch.cuda.current_device()}")
-            print(f"  bfloat16 supported: {torch.cuda.is_bf16_supported()}")
-            for device_id in range(num_devices):
-                print(f"  Device Name[{device_id}]: {torch.cuda.get_device_name(device_id)}")
-            print("Memory Usage:")
-            for device_id in range(num_devices):
-                print(
-                    f"  Allocated[{device_id}]:",
-                    round(torch.cuda.memory_allocated(device_id) / 1024**3, 1),
-                    "GB",
-                )
-                print(
-                    f"  Cached[{device_id}]:   ",
-                    round(torch.cuda.memory_reserved(device_id) / 1024**3, 1),
-                    "GB",
-                )
+            n_cores = psutil.cpu_count(logical=False)
+            os.environ["OMP_NUM_THREADS"] = f"{n_cores}"
+            # torch.set_num_interop_threads()  # Inter-op parallelism
+            # torch.set_num_threads()  # Intra-op parallelism
+        self.print_device_info()
 
     @property
     def model_name(self) -> str:
         return MODELS.get(self.model_id, BigramLanguageModel).__name__
+
+    @property
+    def device_count(self):
+        if self.device_type == "cuda":
+            n_gpus = torch.cuda.device_count()
+            return n_gpus
+        return 1
 
     def dict(self):
         x = {k: str(v) for k, v in asdict(self).items()}
@@ -133,6 +123,31 @@ class ModelConfig:
             return f"{self.device}|{self.model_name.lower()}|{self.source.lower()}|{hash}"
         # Create ID for each run... So that there
         return f"{self.device}|{self.model_id}|{datetime.now().isoformat().replace(':', '.')}"
+
+    def print_device_info(self):
+        if self.device_type == "cpu":
+            print(torch.__config__.parallel_info())
+        elif self.device_type == "cuda":
+            # torch.cuda.device(0) # -> <torch.cuda.device at 0x7efce0b03be0>
+            print("CUDA Devices Info:")
+            num_devices = torch.cuda.device_count()
+            print(f"  Count: {num_devices}")
+            print(f"  Current Device = {torch.cuda.current_device()}")
+            print(f"  bfloat16 supported: {torch.cuda.is_bf16_supported()}")
+            for device_id in range(num_devices):
+                print(f"  Device Name[{device_id}]: {torch.cuda.get_device_name(device_id)}")
+            print("Memory Usage:")
+            for device_id in range(num_devices):
+                print(
+                    f"  Allocated[{device_id}]:",
+                    round(torch.cuda.memory_allocated(device_id) / 1024**3, 1),
+                    "GB",
+                )
+                print(
+                    f"  Cached[{device_id}]:   ",
+                    round(torch.cuda.memory_reserved(device_id) / 1024**3, 1),
+                    "GB",
+                )
 
 
 # ------------------------------------------------------------

@@ -82,6 +82,14 @@ if __name__ == "__main__":
 ## ========================================================================================
 ## Pending things
 ## 1. Learning Decay
-## 2. Resume learning
+## 2. Resume learning, checkpointing
 ## 3. GPT2 weights
+## 4. crop down the model block size (why?)
+## 5. micro_step in range(gradient_accumulation_steps)
+## 6. grad_clip
+## 7. running_mfu
+## 8. creating train.bin, val.bin
+## 9. Support for TPU/XLA
+## 10. Track gradients on WANDB
+## 11. Check torchrun
 ## ========================================================================================

@@ -46,7 +46,8 @@ class GPTTrainer:
             else torch.amp.autocast(device_type=self.cfg.device_type, dtype=ptdtype)
         )
         # initialize a GradScaler. If enabled=False scaler is a no-op
-        self.scaler = torch.cuda.amp.GradScaler(enabled=(dtype == "float16"))
+        scaler_enabled = torch.cuda.is_available() and dtype == "float16"
+        self.scaler = torch.cuda.amp.GradScaler(enabled=scaler_enabled)
 
     @torch.no_grad()
     def print_estimate_loss(self, iter, eval_start_time=None, master_process=True):
@@ -149,16 +150,7 @@ class GPTTrainer:
         out_dir.mkdir(parents=True, exist_ok=True)  # Create, if not exists.
         torch.save(checkpoint, os.path.join(out_dir, f"{self.model.name}.ckpt.pt"))
 
-    def train(self):
-        """Run Loop"""
-        # is this a ddp run?
-        ddp = int(os.environ.get("RANK", -1)) != -1
-        if ddp:
-            ddp_rank = int(os.environ["RANK"])
-            master_process = ddp_rank == 0  # this process will do logging, checkpointing etc.
-        else:
-            master_process = True
-
+    def wandb_init(self, master_process):
         if self.cfg.wandb_log and master_process:
             wandb.init(
                 # set the wandb project where this run will be logged
@@ -171,12 +163,24 @@ class GPTTrainer:
                 tags=[self.cfg.model_name],
             )
 
-        self.train_ddp() if ddp else self.train_single()
+    def wandb_finish(self, master_process):
         if self.cfg.wandb_log and master_process:
             wandb.finish()
 
+    def train(self):
+        """Run Loop"""
+        # is this a ddp run?
+        world_size = self.cfg.device_count
+        ddp = world_size > 1
+        if ddp:
+            train_fn = self.train_ddp
+            mp.spawn(train_fn, args=(world_size,), nprocs=world_size, join=True)
+        else:
+            self.train_single()
+
     def train_single(self):
         # setup manual seed
+        self.wandb_init(master_process=True)
         torch.manual_seed(TORCH_MANUAL_SEED)
 
         # use AdamW instead of torch.optim.SGD
@@ -187,7 +191,7 @@ class GPTTrainer:
         )
         print(f"Model Config: {self.cfg.dict()}")
         print("================================================================")
-        logger.info("training starts")
+        logger.info("training starts [DDP: False]")
         self.print_estimate_loss(0)  # Print Initial Losses!
 
         # optional: track gradients
@@ -222,21 +226,16 @@ class GPTTrainer:
         print(f"Losses: {losses}")
 
         self.save_model(step + 1, optimizer, losses["val"])
+        self.wandb_finish(master_process=True)
         logger.info("training ends")
 
-    def train_ddp(self):
-        """Run Loop with DDP"""
-        train_fn = self.train_ddp_node
-        n_gpus = torch.cuda.device_count()
-        world_size = n_gpus
-        mp.spawn(train_fn, args=(world_size,), nprocs=world_size, join=True)
-
-    def train_ddp_node(self, ddp_local_rank, ddp_world_size):
+    def train_ddp(self, ddp_local_rank, ddp_world_size):
         """Run Loop with DDP - Single node"""
+        master_process = ddp_local_rank == 0  # this process will do logging, checkpointing etc.
+        self.wandb_init(master_process=master_process)
         backend = self.cfg.ddp_device
         init_process_group(backend=backend)
         device = f"cuda:{ddp_local_rank}"
-        master_process = ddp_local_rank == 0  # this process will do logging, checkpointing etc.
 
         torch.cuda.set_device(device)
         seed_offset = ddp_local_rank  # each process gets a different seed
@@ -263,7 +262,13 @@ class GPTTrainer:
         # iter_num = 0
         # best_val_loss = 1e9
 
+        # crop down the model block size if desired, using model surgery
+        # if block_size < model.config.block_size:
+        #     model.crop_block_size(block_size)
+        #     model_args['block_size'] = block_size # so that the checkpoint will have the right value
+        #     model.to(device)
         # optimizer
+
         optimizer = self.model.configure_optimizers(
             self.cfg.weight_decay,
             self.cfg.learning_rate,
@@ -287,7 +292,7 @@ class GPTTrainer:
         )
         print(f"Model Config: {self.cfg.dict()}")
         print("================================================================")
-        logger.info("training starts")
+        logger.info("training starts [DDP: True]")
         self.print_estimate_loss(0, master_process=master_process)  # Print Initial Losses!
 
         # optional: track gradients
@@ -305,9 +310,6 @@ class GPTTrainer:
             xb, yb = self.get_batch("train")  ## xb = B x T
             # print(f"Shapes: {xb.shape} / {yb.shape}")
 
-            ## Zero out existing gradients computed for previous step
-            optimizer.zero_grad(set_to_none=True)
-
             with self.ctx:
                 _logits, loss = self.model(xb, yb)
             # logger.info(f"Step {step} => Loss = {loss.item()}")
@@ -317,6 +319,9 @@ class GPTTrainer:
             ## Update Optimizer
             self.scaler.step(optimizer)
             self.scaler.update()
+
+            # flush the gradients as soon as we can, no need for this memory anymore
+            optimizer.zero_grad(set_to_none=True)
 
         losses = self.print_estimate_loss(step + 1, master_process=master_process)
         elapsed_time = time.time() - start_time
@@ -330,6 +335,7 @@ class GPTTrainer:
         print(f"Losses: {losses}")
 
         self.save_model(step + 1, optimizer, losses["val"])
+        self.wandb_finish(master_process=master_process)
         logger.info("training ends")
 
     def generate(self):
