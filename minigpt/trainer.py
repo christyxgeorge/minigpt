@@ -6,18 +6,27 @@ import math
 import os
 import time
 from contextlib import nullcontext
+from doctest import master
 
 import torch
+import torch.distributed as dist
 import torch.multiprocessing as mp
 import wandb
 from minigpt.config import ModelConfig
 from minigpt.loaders.base import TextDataBase
-from torch.distributed import destroy_process_group, init_process_group
 from torch.nn.parallel import DistributedDataParallel as DDP
 
 logger = logging.getLogger(__name__)
 
 TORCH_MANUAL_SEED = 1337
+
+
+def train_fn(rank, trainer, wsize):
+    """
+    Function called by mp.spawn. Needs to be a top-level function under __main__
+    """
+    print(f"Train function called for rank {rank} / {wsize}")
+    trainer.train_ddp(rank, wsize)
 
 
 class GPTTrainer:
@@ -52,6 +61,9 @@ class GPTTrainer:
     @torch.no_grad()
     def print_estimate_loss(self, iter, eval_start_time=None, master_process=True):
         xlosses = {}
+        if not master_process:  # Nothing to do if not master process
+            return xlosses
+
         ### Put in `inference` mode [Not needed in our case, no different behaviour for our model!]
         self.model.eval()
         eval_elapsed_time = time.time() - eval_start_time if eval_start_time else None
@@ -155,7 +167,7 @@ class GPTTrainer:
             wandb.init(
                 # set the wandb project where this run will be logged
                 project="minigpt",
-                id=str(self.cfg),
+                id=self.cfg.run_id,
                 notes=json.dumps(self.cfg.dict()),
                 # starting_step=0,
                 # resumed=False,
@@ -167,15 +179,24 @@ class GPTTrainer:
         if self.cfg.wandb_log and master_process:
             wandb.finish()
 
-    def train(self):
+    def train(self, use_ddp=True):
         """Run Loop"""
         # is this a ddp run?
         world_size = self.cfg.device_count
-        ddp = world_size > 1
-        if ddp:
-            train_fn = self.train_ddp
-            mp.spawn(train_fn, args=(world_size,), nprocs=world_size, join=True)
+        if use_ddp:
+            logger.info("Training using DDP")
+            mp.set_start_method("spawn")  # , force=True)
+            mp.spawn(
+                train_fn,
+                args=(
+                    self,
+                    world_size,
+                ),
+                nprocs=world_size,
+                join=True,
+            )
         else:
+            logger.info("Training without DDP")
             self.train_single()
 
     def train_single(self):
@@ -233,27 +254,34 @@ class GPTTrainer:
         """Run Loop with DDP - Single node"""
         master_process = ddp_local_rank == 0  # this process will do logging, checkpointing etc.
         self.wandb_init(master_process=master_process)
-        backend = self.cfg.ddp_device
-        init_process_group(backend=backend)
-        device = f"cuda:{ddp_local_rank}"
-
-        torch.cuda.set_device(device)
+        self.setup_ddp(ddp_local_rank, ddp_world_size)
+        if self.cfg.ddp_device == "cuda":
+            device = f"cuda:{ddp_local_rank}"
+            torch.cuda.set_device(device)
         seed_offset = ddp_local_rank  # each process gets a different seed
 
         # world_size number of processes will be training simultaneously, so we can scale
         # down the desired gradient accumulation iterations per process proportionally
-        assert gradient_accumulation_steps % ddp_world_size == 0  # nosec
+        gradient_accumulation_steps = self.cfg.gradient_accumulation_steps
+        # assert gradient_accumulation_steps % ddp_world_size == 0  # nosec
         gradient_accumulation_steps //= ddp_world_size
         tokens_per_iter = (
-            gradient_accumulation_steps * ddp_world_size * self.cfgbatch_size * self.cfg.block_size
+            gradient_accumulation_steps
+            * ddp_world_size
+            * self.cfg.batch_size
+            * self.cfg.block_size
         )
-        print(f"tokens per iteration will be: {tokens_per_iter:,}")
+        if master_process:
+            logger.info(
+                f"tokens per iteration will be: {tokens_per_iter:,}, gradient_accumulation_steps = {gradient_accumulation_steps}"
+            )
 
         if master_process:
             out_dir = self.output_root / "ddp"
             os.makedirs(out_dir, exist_ok=True)
         # setup manual seed
         torch.manual_seed(TORCH_MANUAL_SEED + seed_offset)
+
         if self.cfg.device_type == "cuda":
             torch.backends.cuda.matmul.allow_tf32 = True  # allow tf32 on matmul
             torch.backends.cudnn.allow_tf32 = True  # allow tf32 on cudnn
@@ -282,18 +310,25 @@ class GPTTrainer:
         # compile the model
         if self.cfg.compile:
             print("compiling the model... (takes a ~minute)")
-            model = torch.compile(model)  # requires PyTorch 2.0
+            model = torch.compile(self.model)  # requires PyTorch 2.0
+        else:
+            model = self.model
 
         # wrap model into DDP container
-        model = DDP(model, device_ids=[ddp_local_rank])
-
-        print(
-            f"Training: Model = {self.model.__class__.__name__}, Parameter Count: {self.model.get_num_params()}, Device = {self.model.device}"
+        model = (
+            DDP(model, device_ids=[ddp_local_rank])
+            if self.cfg.ddp_device == "cuda"
+            else DDP(model)
         )
-        print(f"Model Config: {self.cfg.dict()}")
-        print("================================================================")
-        logger.info("training starts [DDP: True]")
-        self.print_estimate_loss(0, master_process=master_process)  # Print Initial Losses!
+
+        if master_process:
+            print(
+                f"Training: Model = {self.model.__class__.__name__}, Parameter Count: {self.model.get_num_params()}, Device = {self.model.device}"
+            )
+            print(f"Model Config: {self.cfg.dict()}")
+            print("================================================================")
+            logger.info("training starts [DDP: True]")
+            self.print_estimate_loss(0, master_process=master_process)  # Print Initial Losses!
 
         # optional: track gradients
         # wandb.watch(self.model)
@@ -323,24 +358,43 @@ class GPTTrainer:
             # flush the gradients as soon as we can, no need for this memory anymore
             optimizer.zero_grad(set_to_none=True)
 
-        losses = self.print_estimate_loss(step + 1, master_process=master_process)
-        elapsed_time = time.time() - start_time
-        print("================================================================")
-        if elapsed_time < 60:
-            logger.info(f"Time taken = {elapsed_time:.3f} secs")
-        else:
-            mins = int(elapsed_time // 60)
-            secs = elapsed_time % 60
-            print(f"Time taken = {elapsed_time:.3f} secs - {mins} mins, {secs:.3f} secs")
-        print(f"Losses: {losses}")
-
-        self.save_model(step + 1, optimizer, losses["val"])
+        if master_process:
+            losses = self.print_estimate_loss(step + 1, master_process=master_process)
+            elapsed_time = time.time() - start_time
+            print("================================================================")
+            if elapsed_time < 60:
+                logger.info(f"Time taken = {elapsed_time:.3f} secs")
+            else:
+                mins = int(elapsed_time // 60)
+                secs = elapsed_time % 60
+                print(f"Time taken = {elapsed_time:.3f} secs - {mins} mins, {secs:.3f} secs")
+            print(f"Losses: {losses}")
+            self.save_model(step + 1, optimizer, losses["val"])
         self.wandb_finish(master_process=master_process)
-        logger.info("training ends")
+        self.cleanup_ddp()
+        if master_process:
+            logger.info("training ends")
 
     def generate(self):
         # Generate Text
         self.model.generate_text(self.tdata, self.cfg)
+
+    def setup_ddp(self, rank, world_size):
+        # Setup MASTER_ADDR/MASTER_PORT for default init_method env://
+        # init_method = "env://"
+        # os.environ["MASTER_ADDR"] = "localhost"
+        # os.environ["MASTER_PORT"] = "12355"
+
+        init_method = "tcp://localhost:12355"
+
+        # initialize the process group
+        backend = self.cfg.ddp_device
+        dist.init_process_group(
+            backend=backend, rank=rank, world_size=world_size, init_method=init_method
+        )
+
+    def cleanup_ddp(self):
+        dist.destroy_process_group()
 
 
 class GPTGenerator:

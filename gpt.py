@@ -4,6 +4,7 @@ import logging
 import os
 from pathlib import Path
 
+import torch.multiprocessing as mp
 from dotenv import dotenv_values, load_dotenv
 from minigpt.trainer import GPTGenerator, GPTTrainer
 
@@ -12,6 +13,7 @@ logging.basicConfig(
     level=logging.DEBUG,
     datefmt="%I:%M:%S",
 )
+logger = logging.getLogger(__name__)
 
 
 def get_args():
@@ -36,6 +38,7 @@ def get_args():
     train_parser.add_argument("-i", "--iterations", dest="max_iters", type=int, default=3000)
     train_parser.add_argument("-r", "--learning-rate", type=float, default=1e-3)
     train_parser.add_argument("-d", "--dropout", type=float, default=0.2)
+    train_parser.add_argument("--no-ddp", dest="use_ddp", action="store_false", default=True)
 
     gen_parser = subparsers.add_parser("generate", parents=[common_parser])
     gen_parser.add_argument("-t", "--tokens", type=int, default=1000)
@@ -72,7 +75,7 @@ if __name__ == "__main__":
 
     if command == "train":
         trainer = GPTTrainer(root_dir, root_dir, args)
-        trainer.train()
+        trainer.train(use_ddp=args.use_ddp)
         trainer.generate()
     else:
         generator = GPTGenerator(root_dir, root_dir, args)
@@ -92,4 +95,8 @@ if __name__ == "__main__":
 ## 9. Support for TPU/XLA
 ## 10. Track gradients on WANDB
 ## 11. Check torchrun
+## 12. wandb.watch to see if model parameters and model architecture can be seen
+## 13. Check Pytorch 2.0 compile!
+## 14. using fused AdamW (model_base.py / configure_optimizers)
+## 15. Diff in val-loss => between using DDP and no DDP
 ## ========================================================================================

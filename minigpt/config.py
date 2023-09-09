@@ -62,14 +62,18 @@ class ModelConfig:
     compile: bool = False  ## use PyTorch 2.0 to compile the model to be faster
     device_type: str = "cpu"
     device = None
-    ddp_device = "gloo"  ## "xla" for TPU, "nccl" for CUDA, "gloo" for CPU
+
+    use_ddp: bool = False
+    ddp_device: str = "gloo"  ## "xla" for TPU, "nccl" for CUDA, "gloo" for CPU
 
     eval_interval: int = 200
     eval_iters: int = 200
 
     verbose: bool = False
     source: str = "s_char"  ## Text Source 's_char', 's_word', 't_stories'
-    wandb_log: bool = False
+
+    wandb_log: bool = False  # TODO: Move to enum: "on", "overwrite", "off"
+    wandb_overwrite: bool = False
 
     def __post_init__(self):
         # Setup Device and Evaluation Parameters
@@ -92,7 +96,19 @@ class ModelConfig:
         if self.device_type == "cuda":
             n_gpus = torch.cuda.device_count()
             return n_gpus
-        return 1
+        return psutil.cpu_count(logical=False)
+
+    @property
+    def run_id(self):
+        if self.wandb_overwrite:
+            # Create ID for a specific model/source/config
+            hash = hashlib.md5(
+                json.dumps(self.dict(), sort_keys=True).encode("utf-8")
+            ).hexdigest()  # nosec
+            return f"{self.device}|{self.model_name.lower()}|{self.source.lower()}|{hash}"
+        # Dont over-write, create unique id for each run...
+        date_str = datetime.now().strftime("%d%b|%H%M%S.%f")[:-3]
+        return f"{self.device}|{self.model_id}|{date_str}"
 
     def dict(self):
         x = {k: str(v) for k, v in asdict(self).items()}
@@ -112,17 +128,6 @@ class ModelConfig:
     @staticmethod
     def default_device():
         return torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    def __repr__(self):
-        overwrite = True
-        if overwrite:
-            # Create ID for a specific model/source/config
-            hash = hashlib.md5(
-                json.dumps(self.dict(), sort_keys=True).encode("utf-8")
-            ).hexdigest()  # nosec
-            return f"{self.device}|{self.model_name.lower()}|{self.source.lower()}|{hash}"
-        # Create ID for each run... So that there
-        return f"{self.device}|{self.model_id}|{datetime.now().isoformat().replace(':', '.')}"
 
     def print_device_info(self):
         if self.device_type == "cpu":
