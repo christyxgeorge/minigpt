@@ -1,7 +1,9 @@
 """"Hyperparameters"""
 import hashlib
 import json
+import logging
 import os
+import pathlib
 from dataclasses import asdict, dataclass
 from datetime import datetime
 
@@ -29,11 +31,17 @@ MODELS = {
     7: GPTLanguageModelv7,
 }
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass
 class ModelConfig:
-    # asdict returns ony fields with type annotations!
+    # Need type annotations for all fields. asdict returns ony fields with type annotations!
     vocab_size: int
+    data_dir: pathlib.PosixPath  # Data directory for the input files
+    out_dir: pathlib.PosixPath
+    source: str = "s_char"  ## Text Source 's_char', 's_word', 't_stories'
+    verbose: bool = False
 
     model_id: int = 0  ## Model Version to use
     batch_size: int = 4  ## Number of independent sequences processed in parallel
@@ -60,32 +68,35 @@ class ModelConfig:
     min_lr: float = 6e-5  # minimum learning rate, should be ~= learning_rate/10 per Chinchilla
 
     compile: bool = False  ## use PyTorch 2.0 to compile the model to be faster
+    profile: bool = False  # use pytorch profiler, or just simple benchmarking?
+
     device_type: str = "cpu"
     device = None
 
     use_ddp: bool = False
+    local_rank: int = 0
     ddp_device: str = "gloo"  ## "xla" for TPU, "nccl" for CUDA, "gloo" for CPU
 
     eval_interval: int = 200
     eval_iters: int = 200
 
-    verbose: bool = False
-    source: str = "s_char"  ## Text Source 's_char', 's_word', 't_stories'
-
-    wandb_log: bool = False  # TODO: Move to enum: "on", "overwrite", "off"
-    wandb_overwrite: bool = False
+    wandb: str = "off"  # "on", "overwrite", "off"
 
     def __post_init__(self):
         # Setup Device and Evaluation Parameters
         self.device_type = "cuda" if torch.cuda.is_available() else "cpu"
-        self.device = torch.device(self.device_type)
+        self.device = torch.device(self.device_type + f":{self.local_rank}")
         self.ddp_device = "nccl" if torch.cuda.is_available() else "gloo"
         if self.device_type == "cpu":
             n_cores = psutil.cpu_count(logical=False)
             os.environ["OMP_NUM_THREADS"] = f"{n_cores}"
             # torch.set_num_interop_threads()  # Inter-op parallelism
             # torch.set_num_threads()  # Intra-op parallelism
-        self.print_device_info()
+        # logger.info(f"config = {self.dict()}, local_rank = {self.local_rank}")
+
+    @property
+    def wandb_log(self) -> bool:
+        return self.wandb != "off"
 
     @property
     def model_name(self) -> str:
@@ -100,17 +111,17 @@ class ModelConfig:
 
     @property
     def run_id(self):
-        if self.wandb_overwrite:
+        if self.wandb == "overwrite":
             # Create ID for a specific model/source/config
             hash = hashlib.md5(
                 json.dumps(self.dict(), sort_keys=True).encode("utf-8")
             ).hexdigest()  # nosec
-            return f"{self.device}|{self.model_name.lower()}|{self.source.lower()}|{hash}"
+            return f"{self.device_type}|{self.model_name.lower()}|{self.source.lower()}|{hash}"
         # Dont over-write, create unique id for each run...
-        date_str = datetime.now().strftime("%d%b|%H%M%S.%f")[:-3]
-        return f"{self.device}|{self.model_id}|{date_str}"
+        date_str = datetime.now().strftime("%d%b|%H.%M.%S.%f")[:-3]
+        return f"{self.device_type}|{self.model_id}|{date_str}"
 
-    def dict(self):
+    def dict(self) -> dict[str, str]:
         x = {k: str(v) for k, v in asdict(self).items()}
         x["model_name"] = self.model_name
         return x
@@ -122,37 +133,20 @@ class ModelConfig:
         return m.to(self.device)
 
     @staticmethod
+    def num_devices() -> int:
+        device_type = "cuda" if torch.cuda.is_available() else "cpu"
+        if device_type == "cuda":
+            n_gpus = torch.cuda.device_count()
+            return n_gpus
+        return psutil.cpu_count(logical=False)
+
+    @staticmethod
     def modelname_fromid(model_id):
         return MODELS.get(model_id, BigramLanguageModel).__name__
 
     @staticmethod
     def default_device():
         return torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    def print_device_info(self):
-        if self.device_type == "cpu":
-            print(torch.__config__.parallel_info())
-        elif self.device_type == "cuda":
-            # torch.cuda.device(0) # -> <torch.cuda.device at 0x7efce0b03be0>
-            print("CUDA Devices Info:")
-            num_devices = torch.cuda.device_count()
-            print(f"  Count: {num_devices}")
-            print(f"  Current Device = {torch.cuda.current_device()}")
-            print(f"  bfloat16 supported: {torch.cuda.is_bf16_supported()}")
-            for device_id in range(num_devices):
-                print(f"  Device Name[{device_id}]: {torch.cuda.get_device_name(device_id)}")
-            print("Memory Usage:")
-            for device_id in range(num_devices):
-                print(
-                    f"  Allocated[{device_id}]:",
-                    round(torch.cuda.memory_allocated(device_id) / 1024**3, 1),
-                    "GB",
-                )
-                print(
-                    f"  Cached[{device_id}]:   ",
-                    round(torch.cuda.memory_reserved(device_id) / 1024**3, 1),
-                    "GB",
-                )
 
 
 # ------------------------------------------------------------

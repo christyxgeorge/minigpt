@@ -4,9 +4,9 @@ import logging
 import os
 from pathlib import Path
 
-import torch.multiprocessing as mp
 from dotenv import dotenv_values, load_dotenv
-from minigpt.trainer import GPTGenerator, GPTTrainer
+from minigpt.generator import GPTGenerator
+from minigpt.trainer import GPTTrainer
 
 logging.basicConfig(
     format="%(asctime)s.%(msecs)03d %(levelname)s:%(message)s",
@@ -27,6 +27,8 @@ def get_args():
     common_parser.add_argument(
         "-s", "--source", default="s_char", choices=["s_char", "s_word", "tiny_stories"]
     )
+    common_parser.add_argument("--data-dir", dest="data_dir")
+    common_parser.add_argument("--out-dir", dest="out_dir")
     common_parser.add_argument("-v", "--verbose", action="store_true", default=False)
 
     train_parser = subparsers.add_parser("train", parents=[common_parser])
@@ -38,6 +40,7 @@ def get_args():
     train_parser.add_argument("-i", "--iterations", dest="max_iters", type=int, default=3000)
     train_parser.add_argument("-r", "--learning-rate", type=float, default=1e-3)
     train_parser.add_argument("-d", "--dropout", type=float, default=0.2)
+    train_parser.add_argument("--wandb", dest="wandb", default="off")
     train_parser.add_argument("--no-ddp", dest="use_ddp", action="store_false", default=True)
 
     gen_parser = subparsers.add_parser("generate", parents=[common_parser])
@@ -45,7 +48,7 @@ def get_args():
     args = parser.parse_args()
     # print(f"Args = {args}")
     command = args.command
-    delattr(args, "command")
+    delattr(args, "command")  # or del args.command
 
     if command == "train" and args.n_embed % args.n_heads != 0:
         print(
@@ -72,31 +75,12 @@ if __name__ == "__main__":
 
     path = Path(__file__)
     root_dir = path.parent.absolute()
+    if not args.data_dir:
+        args.data_dir = root_dir / "data"
+    if not args.out_dir:
+        args.out_dir = root_dir / "checkpoints"
 
     if command == "train":
-        trainer = GPTTrainer(root_dir, root_dir, args)
-        trainer.train(use_ddp=args.use_ddp)
-        trainer.generate()
+        GPTTrainer.train(args)
     else:
-        generator = GPTGenerator(root_dir, root_dir, args)
-        generator.generate()
-
-
-## ========================================================================================
-## Pending things
-## 1. Learning Decay
-## 2. Resume learning, checkpointing
-## 3. GPT2 weights
-## 4. crop down the model block size (why?)
-## 5. micro_step in range(gradient_accumulation_steps)
-## 6. grad_clip
-## 7. running_mfu
-## 8. creating train.bin, val.bin
-## 9. Support for TPU/XLA
-## 10. Track gradients on WANDB
-## 11. Check torchrun
-## 12. wandb.watch to see if model parameters and model architecture can be seen
-## 13. Check Pytorch 2.0 compile!
-## 14. using fused AdamW (model_base.py / configure_optimizers)
-## 15. Diff in val-loss => between using DDP and no DDP
-## ========================================================================================
+        GPTGenerator.generate(args)

@@ -1,5 +1,6 @@
 """The Language Model Classes"""
 import inspect
+import logging
 from typing import TYPE_CHECKING
 
 import torch
@@ -9,6 +10,8 @@ if TYPE_CHECKING:
     from minigpt.config import ModelConfig
 
 from torch.nn import functional as F
+
+logger = logging.getLogger(__name__)
 
 
 class LanguageModelBase(nn.Module):
@@ -39,7 +42,7 @@ class LanguageModelBase(nn.Module):
             n_params -= self.position_embedding_table.weight.numel()
         return n_params
 
-    def configure_optimizers(self, weight_decay, learning_rate, betas, device_type):
+    def configure_optimizers(self, cfg, master_process=True):
         # start with all of the candidate parameters
         param_dict = {pn: p for pn, p in self.named_parameters()}
         # filter out those that do not require grad
@@ -49,23 +52,28 @@ class LanguageModelBase(nn.Module):
         decay_params = [p for n, p in param_dict.items() if p.dim() >= 2]
         nodecay_params = [p for n, p in param_dict.items() if p.dim() < 2]
         optim_groups = [
-            {"params": decay_params, "weight_decay": weight_decay},
+            {"params": decay_params, "weight_decay": cfg.weight_decay},
             {"params": nodecay_params, "weight_decay": 0.0},
         ]
         num_decay_params = sum(p.numel() for p in decay_params)
         num_nodecay_params = sum(p.numel() for p in nodecay_params)
-        print(
-            f"num decayed parameter tensors: {len(decay_params)}, with {num_decay_params:,} parameters"
-        )
-        print(
-            f"num non-decayed parameter tensors: {len(nodecay_params)}, with {num_nodecay_params:,} parameters"
-        )
         # Create AdamW optimizer and use the fused version if it is available
         fused_available = "fused" in inspect.signature(torch.optim.AdamW).parameters
-        use_fused = fused_available and device_type == "cuda"
+        use_fused = fused_available and cfg.device_type == "cuda"
         extra_args = dict(fused=True) if use_fused else dict()
-        optimizer = torch.optim.AdamW(optim_groups, lr=learning_rate, betas=betas, **extra_args)
-        print(f"using fused AdamW: {use_fused}")
+        betas = (cfg.beta1, cfg.beta2)
+        optimizer = torch.optim.AdamW(
+            optim_groups, lr=cfg.learning_rate, betas=betas, **extra_args
+        )
+        # Log pertinent information
+        if master_process:
+            logger.info(
+                f"num decayed parameter tensors: {len(decay_params)}, with {num_decay_params:,} parameters"
+            )
+            logger.info(
+                f"num non-decayed parameter tensors: {len(nodecay_params)}, with {num_nodecay_params:,} parameters"
+            )
+            logger.info(f"using fused AdamW: {use_fused}")
 
         return optimizer
 
@@ -101,14 +109,14 @@ class LanguageModelBase(nn.Module):
         return loss
 
     def generate_text(self, tdata, cfg, num_tokens=200):
-        print("==================================================================")
+        print("=" * 100)
         print(f"  Generating Text [{num_tokens} tokens]")
-        print("==================================================================")
+        print("=" * 100)
         ## Create the initial 'text' to generate the continuation --> Using 0 = \n
         idx = torch.zeros((1, 1), dtype=torch.long, device=cfg.device)
         tokens = self.generate(cfg, idx, num_tokens=num_tokens)
         print(tdata.decode(tokens[0].tolist()))
-        print("==================================================================")
+        print("=" * 100)
 
     @torch.no_grad()
     def generate(self, cfg, idx, num_tokens, temperature=1.0, top_k=None):

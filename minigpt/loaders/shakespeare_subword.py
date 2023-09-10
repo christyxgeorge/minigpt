@@ -1,22 +1,24 @@
 """class for managing data from the tiny shakespeare dataset"""
+import os
+
+import numpy as np
 import tiktoken
 import torch
 
 # import numpy as np
-from minigpt.loaders.base import TextDataBase
+from minigpt.loaders.base import BaseDataset
 
 
-class TextDataTinyShakespeare(TextDataBase):
-    def __init__(self, root_dir, verbose=False):
-        super().__init__(root_dir, f"{root_dir}/data/tiny_shakespeare.txt", verbose=verbose)
-        self.load_data()
+class TinyShakespeareWordData(BaseDataset):
+    def __init__(self, data_dir, verbose=False):
+        super().__init__(data_dir, "tiny_shakespeare.txt", verbose=verbose)
 
-    def load_data(self):
-        """Load Data from file"""
+    def load_token_ids(self) -> tuple[list[int], list[int]]:
+        """Load Token IDs from Dataset"""
         if self.verbose:
-            print("================================================================")
+            print("=" * 100)
             print("Loading Data...")
-            print("================================================================")
+            print("=" * 100)
 
         with open(self.filename, "r") as f:
             self.text = f.read()
@@ -34,20 +36,7 @@ class TextDataTinyShakespeare(TextDataBase):
         train_ids = self.enc.encode_ordinary(train_text)
         val_ids = self.enc.encode_ordinary(val_text)
 
-        self.train_data = torch.tensor(train_ids, dtype=torch.long)
-        self.val_data = torch.tensor(val_ids, dtype=torch.long)
-        if self.verbose:
-            print(f"    Text Length = {len(self.text)}")
-            print(
-                f"    Training len = {len(train_ids):,} tokens, Validation len = {len(val_ids):,} tokens"
-            )
-            print("================================================================")
-
-        # export to bin files
-        # train_ids = np.array(train_ids, dtype=np.uint16)
-        # val_ids = np.array(val_ids, dtype=np.uint16)
-        # train_ids.tofile(os.path.join(os.path.dirname(__file__), 'train.bin'))
-        # val_ids.tofile(os.path.join(os.path.dirname(__file__), 'val.bin'))
+        return train_ids, val_ids
 
     def encode(self, s) -> list[int]:
         """encode a string to a list of integers"""

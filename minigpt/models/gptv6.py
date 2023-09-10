@@ -7,6 +7,7 @@ Dropout: https://jmlr.org/papers/v15/srivastava14a.html#:~:text=Dropout%20is%20a
 """
 import torch
 import torch.nn as nn
+from torch.nn import functional as F
 
 from .blocks import FeedForwardDropout
 from .model_base import LanguageModelBase
