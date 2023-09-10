@@ -4,7 +4,7 @@ import os
 
 import torch
 from minigpt.config import ModelConfig
-from minigpt.loaders.base import BaseDataset
+from minigpt.loaders.loader_base import BaseDataset
 
 logger = logging.getLogger(__name__)
 

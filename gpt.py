@@ -6,6 +6,7 @@ from pathlib import Path
 
 from dotenv import dotenv_values, load_dotenv
 from minigpt.generator import GPTGenerator
+from minigpt.loaders.loader_base import BaseDataset
 from minigpt.trainer import GPTTrainer
 
 logging.basicConfig(
@@ -25,7 +26,9 @@ def get_args():
     common_parser = argparse.ArgumentParser(add_help=False)
     common_parser.add_argument("-m", "--model_id", type=int, default=0)
     common_parser.add_argument(
-        "-s", "--source", default="s_char", choices=["s_char", "s_word", "tiny_stories"]
+        "-s",
+        "--source",
+        choices=BaseDataset.loaders(),
     )
     common_parser.add_argument("--data-dir", dest="data_dir")
     common_parser.add_argument("--out-dir", dest="out_dir")
@@ -50,6 +53,9 @@ def get_args():
     command = args.command
     delattr(args, "command")  # or del args.command
 
+    if not args.source:
+        args.source = BaseDataset.default_loader()
+
     if command == "train" and args.n_embed % args.n_heads != 0:
         print(
             f"Error: Invalid multiple of heads [{args.n_heads}] to embedding dimensions [{args.n_embed}]"
@@ -58,7 +64,7 @@ def get_args():
     return command, args
 
 
-def set_env(verbose=False):
+def set_env(verbose=False) -> None:
     """Load Environment Variables..."""
 
     if verbose:
@@ -75,10 +81,8 @@ if __name__ == "__main__":
 
     path = Path(__file__)
     root_dir = path.parent.absolute()
-    if not args.data_dir:
-        args.data_dir = root_dir / "data"
-    if not args.out_dir:
-        args.out_dir = root_dir / "checkpoints"
+    args.data_dir = Path(args.data_dir) if args.data_dir else root_dir / "data"
+    args.out_dir = Path(args.out_dir) if args.out_dir else root_dir / "checkpoints"
 
     if command == "train":
         GPTTrainer.train(args)

@@ -12,7 +12,7 @@ import torch.distributed as dist
 import torch.multiprocessing as mp
 import wandb
 from minigpt.config import ModelConfig
-from minigpt.loaders.base import BaseDataset
+from minigpt.loaders.loader_base import BaseDataset
 from torch.nn.parallel import DistributedDataParallel as DDP
 
 logger = logging.getLogger(__name__)
@@ -107,7 +107,7 @@ class GPTTrainer:
             print(f"  bfloat16 supported: {torch.cuda.is_bf16_supported()}")
             for device_id in range(num_devices):
                 print(f"  Device Name[{device_id}]: {torch.cuda.get_device_name(device_id)}")
-                print("Memory Usage [{device_id}]")
+                print(f"Memory Usage [{device_id}]")
                 print(
                     f"  Allocated:",
                     round(torch.cuda.memory_allocated(device_id) / 1024**3, 1),
@@ -191,6 +191,8 @@ class GPTTrainer:
 
     def wandb_init(self):
         if self.cfg.wandb_log and self.master_process:
+            wandb_api_key = os.environ("WANDB_API_KEY")
+            wandb.login(key=wandb_api_key)
             wandb.init(
                 # set the wandb project where this run will be logged
                 project="minigpt",
@@ -219,7 +221,7 @@ class GPTTrainer:
         )
         print(f"Model Config: {self.cfg.dict()}")
         print("=" * 100)
-        logger.info("training starts [DDP: False]")
+        logger.info(f"training starts [DDP: False, Scaler Enabled = {self.scaler.is_enabled()}]")
         self.print_estimate_loss(0)  # Print Initial Losses!
 
         # optional: track gradients
@@ -231,16 +233,7 @@ class GPTTrainer:
             if step and step % self.cfg.eval_interval == 0:
                 self.print_estimate_loss(step, eval_start_time=eval_start_time)
                 eval_start_time = time.time()
-
-            xb, yb = self.get_batch("train")  ## xb = B x T
-            # print(f"Shapes: {xb.shape} / {yb.shape}")
-            with self.ctx:
-                _logits, loss = self.model(xb, yb)
-            ## Zero out existing gradients computed for previous step
-            optimizer.zero_grad(set_to_none=True)
-            loss.backward()
-            optimizer.step()  ## change the weights based on the gradients
-            # logger.info(f"Step {step} => Loss = {loss.item()}")
+            self.train_epoch(optimizer)
 
         losses = self.print_estimate_loss(step + 1)
         elapsed_time = time.time() - start_time
@@ -324,7 +317,9 @@ class GPTTrainer:
             )
             print(f"Model Config: {self.cfg.dict()}")
             print("=" * 100)
-            logger.info(f"training starts [DDP: {self.world_size} devices]")
+            logger.info(
+                f"training starts [DDP: {self.world_size} devices,  Scaler Enabled = {self.scaler.is_enabled()}]"
+            )
             self.print_estimate_loss(0)  # Print Initial Losses!
 
         # optional: track gradients
@@ -338,7 +333,7 @@ class GPTTrainer:
                 self.print_estimate_loss(step, eval_start_time=eval_start_time)
                 eval_start_time = time.time()
 
-            self.train_epoch(self, optimizer)
+            self.train_epoch(optimizer)
         train_time = time.time() - train_start_time
 
         # Logging Summary etc
@@ -358,17 +353,27 @@ class GPTTrainer:
         if self.master_process:
             logger.info("training ends")
 
-    def train_epoch(self, step, optimizer):
+    # def train_single_epoch(self, optimizer):
+    #     xb, yb = self.get_batch("train")  ## xb = B x T
+
+    #     with self.ctx:
+    #         _logits, loss = self.model(xb, yb)
+    #     loss.backward()
+    #     optimizer.step()  ## change the weights based on the gradients
+
+    #     # flush the gradients as soon as we can, no need for this memory anymore
+    #     optimizer.zero_grad(set_to_none=True)
+
+    def train_epoch(self, optimizer) -> None:
         xb, yb = self.get_batch("train")  ## xb = B x T
-        # print(f"Shapes: {xb.shape} / {yb.shape}")
 
         with self.ctx:
             _logits, loss = self.model(xb, yb)
-        # logger.info(f"Step {step} => Loss = {loss.item()}")
 
         ## Scale Gradients
         self.scaler.scale(loss).backward()
-        ## Update Optimizer
+
+        ## Update Optimizer, Scaler
         self.scaler.step(optimizer)
         self.scaler.update()
 

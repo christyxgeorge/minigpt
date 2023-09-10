@@ -1,0 +1,2 @@
+from .shakespeare_char import TinyShakespeareCharData
+from .shakespeare_subword import TinyShakespeareWordData

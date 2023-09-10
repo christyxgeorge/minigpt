@@ -1,11 +1,12 @@
 """class for managing data from the tiny shakespeare dataset"""
-import torch
-from minigpt.loaders.base import BaseDataset
+from minigpt.loaders.loader_base import BaseDataset
 
 
 class TinyShakespeareCharData(BaseDataset):
-    def __init__(self, data_dir, verbose=False):
-        super().__init__(data_dir, "tiny_shakespeare.txt", verbose=verbose)
+    @property
+    def name(self) -> str:
+        """Return the dataset name"""
+        return "Tiny Shakespeare (Character tokens)"
 
     def load_token_ids(self) -> tuple[list[int], list[int]]:
         """Load token IDs from file"""

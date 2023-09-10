@@ -40,7 +40,7 @@ class ModelConfig:
     vocab_size: int
     data_dir: pathlib.PosixPath  # Data directory for the input files
     out_dir: pathlib.PosixPath
-    source: str = "s_char"  ## Text Source 's_char', 's_word', 't_stories'
+    source: str
     verbose: bool = False
 
     model_id: int = 0  ## Model Version to use

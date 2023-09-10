@@ -1,6 +1,7 @@
 """Base load to handle text data"""
 from __future__ import annotations
 
+import importlib
 import logging
 import pathlib
 from abc import ABC, abstractmethod
@@ -9,6 +10,12 @@ import numpy as np
 import torch
 
 logger = logging.getLogger(__name__)
+
+LOADERS = {
+    "s_char": {"cls": "TinyShakespeareCharData", "filename": "tiny_shakespeare.txt"},
+    "s_word": {"cls": "TinyShakespeareWordData", "filename": "tiny_shakespeare.txt"},
+}
+DEFAULT_LOADER = "s_char"
 
 
 class BaseDataset(ABC):
@@ -36,6 +43,19 @@ class BaseDataset(ABC):
         if not self.prepared:
             logger.info("bin files not found, loading data!")
             self.load_data()
+
+    @staticmethod
+    def default_loader():
+        return DEFAULT_LOADER
+
+    @staticmethod
+    def loaders():
+        return LOADERS.keys()
+
+    @property
+    @abstractmethod
+    def name(self) -> str:
+        """Return the dataset name"""
 
     @abstractmethod
     def load_token_ids(self) -> tuple[list[int], list[int]]:
@@ -79,18 +99,15 @@ class BaseDataset(ABC):
             print("=" * 100)
 
     @classmethod
-    def get_loader(cls, type, root_dir, verbose=False) -> BaseDataset | None:
-        if type == "s_char":
-            from .shakespeare_char import TinyShakespeareCharData
-
-            return TinyShakespeareCharData(root_dir, verbose=verbose)
-        elif type == "s_word":
-            from .shakespeare_subword import TinyShakespeareWordData
-
-            return TinyShakespeareWordData(root_dir, verbose=verbose)
+    def get_loader(cls, type, root_dir, verbose=False) -> BaseDataset:
+        current_package = importlib.import_module(__package__)
+        cls_info = LOADERS.get(type)
+        if cls_info:
+            cls = getattr(current_package, cls_info["cls"])
+            return cls(root_dir, cls_info["filename"], verbose=verbose)
         else:
-            print(f"Unknown TextData Type: {type}")
-            raise ValueError(f"Unknown TextData Type: {type} - Should be `s_char` or `s_word`")
+            print(f"Unknown Dataset Type: {type}")
+            raise ValueError(f"Unknown Dataset Type: {type} - Should be one of {LOADERS.keys()}")
 
     def get_batch(self, cfg, split) -> tuple[torch.Tensor, torch.Tensor]:
         """Batch Size = Number of sequences being processed in parallel!"""
