@@ -5,17 +5,17 @@ import tiktoken
 from minigpt.loaders.loader_base import BaseDataset
 
 
-class TinyShakespeareWordData(BaseDataset):
+class SpotifyMillionSongsData(BaseDataset):
     @property
     def name(self) -> str:
         """Return the dataset name"""
-        return "Tiny Shakespeare (Word tokens)"
+        return "Spotify Million Songs"
 
     def download(self):
         # download the tiny shakespeare dataset
-        input_file_path = self.data_dir / "tiny_shakespeare.txt"
+        input_file_path = self.data_dir / "spotify_millsongdata.csv"
         if not input_file_path.exists():
-            data_url = "https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt"
+            data_url = "https://www.kaggle.com/datasets/notshrirang/spotify-million-song-dataset/download?datasetVersionNumber=1"
             with open(input_file_path, "w") as f:
                 f.write(requests.get(data_url).text)  # nosec
 

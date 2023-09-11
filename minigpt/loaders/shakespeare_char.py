@@ -1,4 +1,5 @@
 """class for managing data from the tiny shakespeare dataset"""
+import requests  # type: ignore
 from minigpt.loaders.loader_base import BaseDataset
 
 
@@ -7,6 +8,25 @@ class TinyShakespeareCharData(BaseDataset):
     def name(self) -> str:
         """Return the dataset name"""
         return "Tiny Shakespeare (Character tokens)"
+
+    def download(self):
+        # download the tiny shakespeare dataset
+        input_file_path = self.data_dir / "tiny_shakespeare.txt"
+        if not input_file_path.exists():
+            data_url = "https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt"
+            with open(input_file_path, "w") as f:
+                f.write(requests.get(data_url).text)  # nosec
+
+    def get_metadata(self):
+        """Get metadata to save alongwith train/val.bin"""
+        return {"vocab_chars": self.vocab_chars, "vocab_size": self.vocab_size}
+
+    def load_metadata(self, metadata):
+        """Load metadata saved alongwith train/val.bin"""
+        self.vocab_chars = metadata["vocab_chars"]
+        self.vocab_size = metadata["vocab_size"]
+        self.stoi = {ch: i for i, ch in enumerate(self.vocab_chars)}
+        self.itos = {i: ch for i, ch in enumerate(self.vocab_chars)}
 
     def load_token_ids(self) -> tuple[list[int], list[int]]:
         """Load token IDs from file"""

@@ -17,7 +17,7 @@ class GPTGenerator:
         self.out_dir = args.out_dir
         self.num_tokens = args.tokens
         self.verbose = args.verbose
-        self.tdata = BaseDataset.get_loader(args.source, args.data_dir, verbose=False)
+        self.tdata = BaseDataset.get_loader(args.source, args.data_dir, verbose=False, load=True)
         checkpoint = self.load_checkpoint(args.model_id, args.source)
         self.cfg = checkpoint["config"]
         state_dict = checkpoint["model"]

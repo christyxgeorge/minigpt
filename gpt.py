@@ -3,17 +3,21 @@ import argparse
 import logging
 import os
 from pathlib import Path
+from typing import Literal
 
 from dotenv import dotenv_values, load_dotenv
 from minigpt.generator import GPTGenerator
 from minigpt.loaders.loader_base import BaseDataset
 from minigpt.trainer import GPTTrainer
 
-logging.basicConfig(
-    format="%(asctime)s.%(msecs)03d %(levelname)s:%(message)s",
-    level=logging.DEBUG,
-    datefmt="%I:%M:%S",
-)
+# log_format = '%(asctime)s.%(msecs)03d %(message)s'
+# log_style: Literal["%", "{", "$"] = '%'
+log_format = "{asctime}.{msecs:3.0f} {levelname} [{name}]: {message}"
+log_style: Literal["%", "{", "$"] = "{"
+logging.basicConfig(format=log_format, level=logging.DEBUG, datefmt="%I:%M:%S", style=log_style)
+# print(f"Log Level Before = {logging.getLogger('minigpt').level} // {logging.getLogger().level}")
+# logging.getLogger("minigpt").setLevel(logging.DEBUG)  # logging.getLogger().level)
+# print(f"Log Level After  = {logging.getLogger('minigpt').level} // {logging.getLogger().level}")
 logger = logging.getLogger(__name__)
 
 
@@ -34,6 +38,13 @@ def get_args():
     common_parser.add_argument("--out-dir", dest="out_dir")
     common_parser.add_argument("-v", "--verbose", action="store_true", default=False)
 
+    # Sub-parser for getting options to download the data
+    _down_parser = subparsers.add_parser("download", parents=[common_parser])
+
+    # Sub-parser for getting options to prepare the data
+    _prep_parser = subparsers.add_parser("prepare", parents=[common_parser])
+
+    # Sub-parser for getting options to  train
     train_parser = subparsers.add_parser("train", parents=[common_parser])
     train_parser.add_argument("-b", "--batch", dest="batch_size", type=int, default=4)
     train_parser.add_argument("-k", "--block", dest="block_size", type=int, default=8)
@@ -46,6 +57,7 @@ def get_args():
     train_parser.add_argument("--wandb", dest="wandb", default="off")
     train_parser.add_argument("--no-ddp", dest="use_ddp", action="store_false", default=True)
 
+    # Sub-parser for getting options to  generate
     gen_parser = subparsers.add_parser("generate", parents=[common_parser])
     gen_parser.add_argument("-t", "--tokens", type=int, default=1000)
     args = parser.parse_args()
@@ -84,7 +96,21 @@ if __name__ == "__main__":
     args.data_dir = Path(args.data_dir) if args.data_dir else root_dir / "data"
     args.out_dir = Path(args.out_dir) if args.out_dir else root_dir / "checkpoints"
 
-    if command == "train":
+    ## Create directories if they dont exist
+    args.data_dir.mkdir(parents=True, exist_ok=True)
+    args.out_dir.mkdir(parents=True, exist_ok=True)
+
+    if command == "download":
+        loader = BaseDataset.get_loader(args.source, args.data_dir, verbose=args.verbose)
+        loader.download()
+    elif command == "prepare":  ## Create train.bin, val.bin
+        loader = BaseDataset.get_loader(args.source, args.data_dir, verbose=args.verbose)
+        loader.prepare()
+    elif command == "train":
         GPTTrainer.train(args)
-    else:
+    elif command == "generate":
         GPTGenerator.generate(args)
+    else:
+        print(
+            f"Invalid Command: {command} => Should be one of `download`, `prepare`, `train` or `generate`"
+        )

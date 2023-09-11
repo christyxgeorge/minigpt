@@ -42,7 +42,9 @@ class GPTTrainer:
         self.master_process = self.local_rank == 0
 
         self.verbose = args.verbose
-        self.tdata = BaseDataset.get_loader(args.source, args.data_dir, verbose=self.verbose)
+        self.tdata = BaseDataset.get_loader(
+            args.source, args.data_dir, verbose=self.verbose, load=True
+        )
         self.cfg = ModelConfig(
             **vars(args), vocab_size=self.tdata.vocab_size, local_rank=self.local_rank
         )
@@ -191,7 +193,7 @@ class GPTTrainer:
 
     def wandb_init(self):
         if self.cfg.wandb_log and self.master_process:
-            wandb_api_key = os.environ("WANDB_API_KEY")
+            wandb_api_key = os.environ["WANDB_API_KEY"]
             wandb.login(key=wandb_api_key)
             wandb.init(
                 # set the wandb project where this run will be logged
@@ -345,7 +347,7 @@ class GPTTrainer:
             else:
                 mins = int(train_time // 60)
                 secs = train_time % 60
-                print(f"Time taken = {train_time:.3f} secs - {mins} mins, {secs:.3f} secs")
+                logger.info(f"Time taken = {train_time:.3f} secs - {mins} mins, {secs:.3f} secs")
             print(f"Losses: {losses}")
             self.save_model(step + 1, optimizer, losses["val"])
         self.wandb_finish()
