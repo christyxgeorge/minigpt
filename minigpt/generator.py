@@ -32,7 +32,7 @@ class GPTGenerator:
     @staticmethod
     def generate(args):
         generator = GPTGenerator(args)
-        generator.generate_text()
+        generator.generate_text(args.start_with)
 
     def load_checkpoint(self, model_id, source):
         out_dir = self.out_dir / source
@@ -42,6 +42,8 @@ class GPTGenerator:
         checkpoint = torch.load(ckpt_path, map_location=device)
         return checkpoint
 
-    def generate_text(self):
+    def generate_text(self, start_with):
         # Generate Text
-        self.model.generate_text(self.tdata, self.cfg, num_tokens=self.num_tokens)
+        self.model.generate_text(
+            self.tdata, self.cfg, num_tokens=self.num_tokens, start_with=start_with
+        )

@@ -12,7 +12,7 @@ from minigpt.loaders.loader_base import BaseDataset
 
 class TinyStoriesData(BaseDataset):
     def download(self):
-        """Downloads the TinyStories dataset to DATA_CACHE_DIR"""
+        """Downloads the TinyStories dataset to data_dir"""
         os.makedirs(self.data_dir, exist_ok=True)
 
         # download the TinyStories dataset, unless it's already downloaded

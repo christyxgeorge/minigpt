@@ -108,12 +108,17 @@ class LanguageModelBase(nn.Module):
             loss = F.cross_entropy(logits, targets)
         return loss
 
-    def generate_text(self, tdata, cfg, num_tokens=200):
+    def generate_text(self, tdata, cfg, num_tokens=200, start_with=None):
         print("=" * 100)
         print(f"  Generating Text [{num_tokens} tokens]")
         print("=" * 100)
         ## Create the initial 'text' to generate the continuation --> Using 0 = \n
         idx = torch.zeros((1, 1), dtype=torch.long, device=cfg.device)
+        # if start_with:
+        #     num_tokens = self.tdata.encode(idx)
+        #     idx = torch.zeros((1, 1), dtype=torch.long, device=cfg.device)
+        # else:
+        #     idx = torch.zeros((1, 1), dtype=torch.long, device=cfg.device)
         tokens = self.generate(cfg, idx, num_tokens=num_tokens)
         print(tdata.decode(tokens[0].tolist()))
         print("=" * 100)

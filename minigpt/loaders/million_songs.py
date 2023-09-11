@@ -1,7 +1,8 @@
 """class for managing data from the tiny shakespeare dataset"""
 
-import requests  # type: ignore
+import pandas as pd
 import tiktoken
+from kaggle.api.kaggle_api_extended import KaggleApi  # type: ignore
 from minigpt.loaders.loader_base import BaseDataset
 
 
@@ -12,12 +13,10 @@ class SpotifyMillionSongsData(BaseDataset):
         return "Spotify Million Songs"
 
     def download(self):
-        # download the tiny shakespeare dataset
-        input_file_path = self.data_dir / "spotify_millsongdata.csv"
-        if not input_file_path.exists():
-            data_url = "https://www.kaggle.com/datasets/notshrirang/spotify-million-song-dataset/download?datasetVersionNumber=1"
-            with open(input_file_path, "w") as f:
-                f.write(requests.get(data_url).text)  # nosec
+        # download the spotify million songs dataset
+        file_name = "spotify_millsongdata.csv"
+        dataset_name = "spotify-million-song-dataset"
+        self.download_kaggle("notshrirang", dataset_name, file_name)
 
     def get_metadata(self):
         """Get metadata to save alongwith train/val.bin"""
@@ -25,22 +24,24 @@ class SpotifyMillionSongsData(BaseDataset):
 
     def load_metadata(self, metadata):
         """Load metadata saved alongwith train/val.bin"""
+        self.enc = tiktoken.get_encoding("gpt2")
         self.vocab_size = metadata["vocab_size"]
+        print("Loaded metadata from file")
 
     def load_token_ids(self) -> tuple[list[int], list[int]]:
         """Load Token IDs from Dataset"""
         if self.verbose:
             print("=" * 100)
-            print("Loading Data...")
+            print(f"Loading Data [{self.filename}]...")
             print("=" * 100)
 
-        with open(self.filename, "r") as f:
-            self.text = f.read()
+        df = pd.read_csv(self.filename, on_bad_lines="warn")
+        text = df["text"].str.cat(sep="\n")
 
         # Split in train, val
-        tv_split = int(0.9 * len(self.text))
-        train_text = self.text[:tv_split]
-        val_text = self.text[tv_split:]
+        tv_split = int(0.9 * len(text))
+        train_text = text[:tv_split]
+        val_text = text[tv_split:]
 
         # GPT-2 vocab_size of 50257, padded up to nearest multiple of 64 for efficiency
         self.vocab_size = 50304

@@ -32,18 +32,18 @@ class TinyShakespeareCharData(BaseDataset):
         """Load token IDs from file"""
         if self.verbose:
             print("=" * 100)
-            print("Loading Data...")
+            print("Loading Data [{self.filename}]...")
             print("=" * 100)
         with open(self.filename, "r", encoding="utf-8") as f:
-            self.text = f.read()
+            text = f.read()
 
         # Unique Characters in the text
-        self.vocab_chars = sorted(list(set(self.text)))
+        self.vocab_chars = sorted(list(set(text)))
         self.vocab_size = len(self.vocab_chars)
         self.stoi = {ch: i for i, ch in enumerate(self.vocab_chars)}
         self.itos = {i: ch for i, ch in enumerate(self.vocab_chars)}
 
-        token_ids = self.encode(self.text)
+        token_ids = self.encode(text)
 
         # Split in train, val
         tv_split = int(0.9 * len(token_ids))

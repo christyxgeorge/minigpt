@@ -60,6 +60,8 @@ def get_args():
     # Sub-parser for getting options to  generate
     gen_parser = subparsers.add_parser("generate", parents=[common_parser])
     gen_parser.add_argument("-t", "--tokens", type=int, default=1000)
+    gen_parser.add_argument("--start-with", dest="start_with", default=None)
+
     args = parser.parse_args()
     # print(f"Args = {args}")
     command = args.command

@@ -31,16 +31,16 @@ class TinyShakespeareWordData(BaseDataset):
         """Load Token IDs from Dataset"""
         if self.verbose:
             print("=" * 100)
-            print("Loading Data...")
+            print("Loading Data [{self.filename}]...")
             print("=" * 100)
 
         with open(self.filename, "r") as f:
-            self.text = f.read()
+            text = f.read()
 
         # Split in train, val
-        tv_split = int(0.9 * len(self.text))
-        train_text = self.text[:tv_split]
-        val_text = self.text[tv_split:]
+        tv_split = int(0.9 * len(text))
+        train_text = text[:tv_split]
+        val_text = text[tv_split:]
 
         # GPT-2 vocab_size of 50257, padded up to nearest multiple of 64 for efficiency
         self.vocab_size = 50304

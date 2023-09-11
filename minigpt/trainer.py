@@ -1,5 +1,6 @@
 """MiniGPT Trainer"""
 
+import gc
 import json
 import logging
 import math
@@ -210,6 +211,23 @@ class GPTTrainer:
         if self.cfg.wandb_log and self.master_process:
             wandb.finish()
 
+    def print_training_info(self):
+        print(
+            f"Training: Model = {self.model.__class__.__name__}, "
+            f"Parameter Count: {self.model.get_num_params():,}, "
+            f"Device = {self.model.device}, Data Prepared: {self.tdata.prepared}"
+        )
+        print(f"Model Config: {self.cfg.dict()}")
+        print("=" * 100)
+        if self.cfg.use_ddp:
+            logger.info(
+                f"training starts [DDP: {self.world_size} devices,  Scaler Enabled = {self.scaler.is_enabled()}]"
+            )
+        else:
+            logger.info(
+                f"training starts [DDP: False, Scaler Enabled = {self.scaler.is_enabled()}]"
+            )
+
     def train_single(self):
         # setup manual seed
         self.wandb_init()
@@ -218,12 +236,7 @@ class GPTTrainer:
         # use AdamW instead of torch.optim.SGD
         optimizer = torch.optim.AdamW(self.model.parameters(), lr=self.cfg.learning_rate)
 
-        print(
-            f"Training: Model = {self.model.__class__.__name__}, Parameter Count: {self.model.get_num_params()}, Device = {self.model.device}"
-        )
-        print(f"Model Config: {self.cfg.dict()}")
-        print("=" * 100)
-        logger.info(f"training starts [DDP: False, Scaler Enabled = {self.scaler.is_enabled()}]")
+        self.print_training_info()
         self.print_estimate_loss(0)  # Print Initial Losses!
 
         # optional: track gradients
@@ -314,14 +327,7 @@ class GPTTrainer:
         )
 
         if self.master_process:
-            print(
-                f"Training: Model = {self.model.__class__.__name__}, Parameter Count: {self.model.get_num_params()}, Device = {self.model.device}"
-            )
-            print(f"Model Config: {self.cfg.dict()}")
-            print("=" * 100)
-            logger.info(
-                f"training starts [DDP: {self.world_size} devices,  Scaler Enabled = {self.scaler.is_enabled()}]"
-            )
+            self.print_training_info()
             self.print_estimate_loss(0)  # Print Initial Losses!
 
         # optional: track gradients
@@ -381,6 +387,12 @@ class GPTTrainer:
 
         # flush the gradients as soon as we can, no need for this memory anymore
         optimizer.zero_grad(set_to_none=True)
+
+        # Clear memory immediately
+        del xb
+        del yb
+        gc.collect()
+        torch.cuda.empty_cache()
 
     def setup_ddp(self):
         # Setup MASTER_ADDR/MASTER_PORT for default init_method env://

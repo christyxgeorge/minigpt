@@ -147,16 +147,3 @@ class ModelConfig:
     @staticmethod
     def default_device():
         return torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-
-# ------------------------------------------------------------
-# Final Hyper-paramaeters (Will definitely require GPU/TPU)
-# ------------------------------------------------------------
-# batch_size = 64  ## Number of independent sequences processed in parallel
-# block_size = 256  ## Context Length for the prediction
-# n_embed = 384  ## Dimension of the embedding
-# n_layers = 6
-# n_heads = 6
-# max_iters = 5000
-# learning_rate = 3e-4
-# dropout = 0.2

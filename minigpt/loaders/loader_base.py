@@ -3,8 +3,11 @@ from __future__ import annotations
 
 import importlib
 import logging
+import os
 import pathlib
 import pickle  # nosec
+import shutil
+import zipfile
 from abc import ABC, abstractmethod
 
 import numpy as np
@@ -94,8 +97,8 @@ class BaseDataset(ABC):
         self.download()  # Download the file, if not available
         train_ids, val_ids = self.load_token_ids()
         # export to bin files
-        train_ids = np.array(train_ids, dtype=np.uint16)
-        val_ids = np.array(val_ids, dtype=np.uint16)
+        train_ids = np.array(train_ids, dtype=np.int32)
+        val_ids = np.array(val_ids, dtype=np.int32)
         train_ids.tofile(self.bin_dir / self.train_bin)
         val_ids.tofile(self.bin_dir / self.val_bin)
         metadata = self.get_metadata()
@@ -108,8 +111,8 @@ class BaseDataset(ABC):
         """Load Data from file"""
         if self.prepared:
             # poor man's data loader [Load from train.bin, val.bin]
-            self.train_data = np.memmap(self.bin_dir / self.train_bin, dtype=np.uint16, mode="r")
-            self.val_data = np.memmap(self.bin_dir / self.val_bin, dtype=np.uint16, mode="r")
+            self.train_data = np.memmap(self.bin_dir / self.train_bin, dtype=np.int32, mode="r")
+            self.val_data = np.memmap(self.bin_dir / self.val_bin, dtype=np.int32, mode="r")
             with open(self.metadata_file, "rb") as pklfile:
                 metadata = pickle.load(pklfile)  # nosec
                 self.load_metadata(metadata)
@@ -200,3 +203,21 @@ class BaseDataset(ABC):
             for data in resp.iter_content(chunk_size=chunk_size):
                 size = file.write(data)
                 bar.update(size)
+
+    def download_kaggle(self, user, dataset_name, file_name):
+        # download the spotify million songs dataset
+        from kaggle.api.kaggle_api_extended import KaggleApi  # type: ignore
+
+        input_file_path = self.data_dir / file_name
+        if not input_file_path.exists():
+            api = KaggleApi()
+            api.authenticate()
+            api.dataset_download_files(f"{user}/{dataset_name}", path=self.data_dir)
+
+            zip_file = self.data_dir / f"{dataset_name}.zip"
+            print(f"Unpacking {zip_file}...")
+            with zipfile.ZipFile(zip_file) as z:
+                with z.open(file_name) as zf, open(input_file_path, "wb") as f:
+                    shutil.copyfileobj(zf, f)
+
+            os.unlink(zip_file)
