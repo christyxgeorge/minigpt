@@ -1,4 +1,4 @@
-from distutils.core import setup
+from setuptools import find_packages, setup
 
 setup(
     name="minigpt",
@@ -7,7 +7,7 @@ setup(
     author="Christy George",
     author_email="christy.george@gmail.com",
     url="https://github.com/christyxgeorge/minigpt",
-    packages=["minigpt"],
+    packages=find_packages(include=["minigpt"]),
     install_requires=[
         "kaggle==1.5.16",
         "numpy",  # ==1.25.2
