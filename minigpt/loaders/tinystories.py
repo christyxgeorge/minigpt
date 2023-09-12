@@ -66,9 +66,6 @@ class TinyStoriesData(BaseDataset):
         """Create train.bin and val.bin files"""
         self.download(force=force)  # Download the file, if not available
         self.train_vocab(self.vocab_size)
-        import pdb
-
-        pdb.set_trace()
         tokenizer_model = self.get_tokenizer_model_path(self.vocab_size)
         self.enc = Tokenizer(tokenizer_model)
         self.pretokenize()
