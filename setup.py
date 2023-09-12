@@ -2,12 +2,12 @@ from setuptools import find_packages, setup
 
 setup(
     name="minigpt",
-    version="1.0.2",
+    version="1.0.3",
     description="Experiments using NanoGPT",
     author="Christy George",
     author_email="christy.george@gmail.com",
     url="https://github.com/christyxgeorge/minigpt",
-    packages=find_packages(include=["minigpt"]),
+    packages=find_packages(),
     install_requires=[
         "kaggle==1.5.16",
         "numpy",  # ==1.25.2
