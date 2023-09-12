@@ -2,7 +2,6 @@
 
 import pandas as pd
 import tiktoken
-from kaggle.api.kaggle_api_extended import KaggleApi  # type: ignore
 from minigpt.loaders.loader_base import BaseDataset
 
 
@@ -13,6 +12,11 @@ class SpotifyMillionSongsData(BaseDataset):
         return "Spotify Million Songs"
 
     def download(self):
+        # download the spotify million songs dataset
+        data_url = "https://raw.githubusercontent.com/christyxgeorge/datasets/main/spotify_millsongdata.csv"
+        self.download_url("spotify_millsongdata.csv", data_url)
+
+    def download_kaggle(self):
         # download the spotify million songs dataset
         file_name = "spotify_millsongdata.csv"
         dataset_name = "spotify-million-song-dataset"

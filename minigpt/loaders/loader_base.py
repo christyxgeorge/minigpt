@@ -221,3 +221,10 @@ class BaseDataset(ABC):
                     shutil.copyfileobj(zf, f)
 
             os.unlink(zip_file)
+
+    def download_url(self, filename, data_url):
+        # download the file from the URL
+        input_file_path = self.data_dir / filename
+        if not input_file_path.exists():
+            with open(input_file_path, "w") as f:
+                f.write(requests.get(data_url).text)  # nosec

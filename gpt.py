@@ -56,6 +56,8 @@ def get_args():
     train_parser.add_argument("-d", "--dropout", type=float, default=0.2)
     train_parser.add_argument("--wandb", dest="wandb", default="off")
     train_parser.add_argument("--no-ddp", dest="use_ddp", action="store_false", default=True)
+    train_parser.add_argument("--compile", action="store_true", default=False)
+    train_parser.add_argument("--eval-only", dest="eval_only", action="store_true", default=False)
 
     # Sub-parser for getting options to  generate
     gen_parser = subparsers.add_parser("generate", parents=[common_parser])

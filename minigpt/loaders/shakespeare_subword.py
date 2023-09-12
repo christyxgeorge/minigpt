@@ -1,6 +1,5 @@
 """class for managing data from the tiny shakespeare dataset"""
 
-import requests  # type: ignore
 import tiktoken
 from minigpt.loaders.loader_base import BaseDataset
 
@@ -13,11 +12,11 @@ class TinyShakespeareWordData(BaseDataset):
 
     def download(self):
         # download the tiny shakespeare dataset
-        input_file_path = self.data_dir / "tiny_shakespeare.txt"
-        if not input_file_path.exists():
-            data_url = "https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt"
-            with open(input_file_path, "w") as f:
-                f.write(requests.get(data_url).text)  # nosec
+        # data_url = "https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt"
+        data_url = (
+            "https://raw.githubusercontent.com/christyxgeorge/datasets/main/tiny_shakespeare.txt"
+        )
+        self.download_url("spotify_millsongdata.csv", data_url)
 
     def get_metadata(self):
         """Get metadata to save alongwith train/val.bin"""

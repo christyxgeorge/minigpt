@@ -79,6 +79,7 @@ class ModelConfig:
 
     eval_interval: int = 200
     eval_iters: int = 200
+    eval_only = False  # if True, script exits right after the first eval
 
     wandb: str = "off"  # "on", "overwrite", "off"
 
@@ -118,7 +119,7 @@ class ModelConfig:
             ).hexdigest()  # nosec
             return f"{self.device_type}|{self.model_name.lower()}|{self.source.lower()}|{hash}"
         # Dont over-write, create unique id for each run...
-        date_str = datetime.now().strftime("%d%b|%H.%M.%S.%f")[:-3]
+        date_str = datetime.now().strftime("%d%b|%H%M%S.%f")[:-3]
         return f"{self.device_type}|{self.model_id}|{date_str}"
 
     def dict(self) -> dict[str, str]:

@@ -124,7 +124,7 @@ class GPTTrainer:
         print("=" * 100)
 
     @torch.no_grad()
-    def print_estimate_loss(self, iter, eval_start_time=None):
+    def print_estimate_loss(self, iter, eval_start_time=None, lr=None, flops=0):
         xlosses = {}
         if not self.master_process:  # Nothing to do if not master process
             return xlosses
@@ -155,6 +155,8 @@ class GPTTrainer:
         if eval_start_time:
             xlosses["eval_time"] = eval_time
             xlosses["est_time"] = estimation_time
+        xlosses["lr"] = lr or self.cfg.learning_rate
+        xlosses["flops"] = flops
         if self.cfg.wandb_log and self.master_process:
             wandb.log(xlosses, step=iter)
         return xlosses
@@ -179,7 +181,7 @@ class GPTTrainer:
         coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio))  # coeff ranges 0..1
         return self.cfg.min_lr + coeff * (self.cfg.learning_rate - self.cfg.min_lr)
 
-    def save_model(self, iter, optimizer, val_loss):
+    def save_model(self, iter, model, optimizer, val_loss):
         checkpoint = {
             "model": self.model.state_dict(),
             "optimizer": optimizer.state_dict(),
@@ -248,7 +250,7 @@ class GPTTrainer:
             if step and step % self.cfg.eval_interval == 0:
                 self.print_estimate_loss(step, eval_start_time=eval_start_time)
                 eval_start_time = time.time()
-            self.train_epoch(optimizer)
+            self.train_epoch(self.model, optimizer)
 
         losses = self.print_estimate_loss(step + 1)
         elapsed_time = time.time() - start_time
@@ -261,7 +263,7 @@ class GPTTrainer:
             print(f"Time taken = {elapsed_time:.3f} secs - {mins} mins, {secs:.3f} secs")
         print(f"Losses: {losses}")
 
-        self.save_model(step + 1, optimizer, losses["val"])
+        self.save_model(step + 1, self.model, optimizer, losses["val"])
         self.wandb_finish()
         logger.info("training ends")
 
@@ -297,10 +299,6 @@ class GPTTrainer:
             torch.backends.cuda.matmul.allow_tf32 = True  # allow tf32 on matmul
             torch.backends.cudnn.allow_tf32 = True  # allow tf32 on cudnn
 
-        # init these up here, can override if init_from='resume' (i.e. from a checkpoint)
-        # iter_num = 0
-        # best_val_loss = 1e9
-
         # crop down the model block size if desired, using model surgery
         # if block_size < model.config.block_size:
         #     model.crop_block_size(block_size)
@@ -325,6 +323,7 @@ class GPTTrainer:
             if self.cfg.device_type == "cuda"
             else DDP(model)
         )
+        raw_model = model.module if ddp else model  # unwrap DDP container if needed
 
         if self.master_process:
             self.print_training_info()
@@ -337,11 +336,33 @@ class GPTTrainer:
         train_start_time = time.time()
         eval_start_time = time.time()
         for step in range(self.cfg.max_iters):  ## `n` steps
+            # determine and set the learning rate for this iteration
+            lr = get_lr(step) if decay_lr else self.cfg.learning_rate
+            for param_group in optimizer.param_groups:
+                param_group["lr"] = lr
+
             if step and step % self.cfg.eval_interval == 0:
-                self.print_estimate_loss(step, eval_start_time=eval_start_time)
+                self.print_estimate_loss(step, eval_start_time=eval_start_time, lr=lr, flops=flops)
                 eval_start_time = time.time()
 
-            self.train_epoch(optimizer)
+            t0 = time.time()
+            self.train_gradient_accum(model, optimizer, self.cfg.gradient_accumulation_steps)
+            dt = time.time() - t0
+
+            if step and step % self.cfg.eval_interval == 0 and master_process:
+                # get loss as float. note: this is a CPU-GPU sync point
+                # scale up to undo the division above, approximating the true total loss (exact would have been a sum)
+                # let the training loop settle a bit [step > 0]
+                lossf = loss.item() * gradient_accumulation_steps
+                flops_achieved = raw_model.flops_achieved(
+                    batch_size * gradient_accumulation_steps, dt
+                )
+            print(
+                f"iter {step}: loss {lossf:.4f}, time {dt*1000:.2f}ms, flops {flops_achieved:.2f}%"
+            )
+            if self.cfg.eval_only:
+                break
+
         train_time = time.time() - train_start_time
 
         # Logging Summary etc
@@ -355,7 +376,9 @@ class GPTTrainer:
                 secs = train_time % 60
                 logger.info(f"Time taken = {train_time:.3f} secs - {mins} mins, {secs:.3f} secs")
             print(f"Losses: {losses}")
-            self.save_model(step + 1, optimizer, losses["val"])
+
+            self.save_model(step + 1, raw_model, optimizer, losses["val"])
+
         self.wandb_finish()
         self.cleanup_ddp()
         if self.master_process:
@@ -372,25 +395,70 @@ class GPTTrainer:
     #     # flush the gradients as soon as we can, no need for this memory anymore
     #     optimizer.zero_grad(set_to_none=True)
 
-    def train_epoch(self, optimizer) -> None:
+    def train_epoch(self, model, optimizer) -> None:
         xb, yb = self.get_batch("train")  ## xb = B x T
 
         with self.ctx:
             _logits, loss = self.model(xb, yb)
 
-        ## Scale Gradients
-        self.scaler.scale(loss).backward()
+        # Delete the input batch tensors immediately
+        del xb, yb
 
-        ## Update Optimizer, Scaler
-        self.scaler.step(optimizer)
-        self.scaler.update()
+        if self.scaler.is_enabled():
+            ## Scale Gradients
+            self.scaler.scale(loss).backward()
+
+            # clip the gradient
+            if self.cfg.grad_clip != 0.0:
+                self.scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), self.cfg.grad_clip)
+
+            ## Update Optimizer, Scaler
+            self.scaler.step(optimizer)
+            self.scaler.update()
+        else:
+            loss.backward()
+            optimizer.step()  ## change the weights based on the gradients
 
         # flush the gradients as soon as we can, no need for this memory anymore
         optimizer.zero_grad(set_to_none=True)
 
         # Clear memory immediately
-        del xb
-        del yb
+        gc.collect()
+        torch.cuda.empty_cache()
+
+    def train_gradient_accum(self, model, optimizer, accum_steps) -> None:
+        # forward backward update, with optional gradient accumulation to simulate larger batch size
+        # and using the GradScaler if data type is float16
+        for micro_step in range(accum_steps):
+            xb, yb = self.get_batch("train")  ## xb = B x T
+            if self.cfg.use_ddp:
+                # in DDP training we only need to sync gradients at the last micro step.
+                # the official way to do this is with model.no_sync() context manager, but
+                # I really dislike that this bloats the code and forces us to repeat code
+                # looking at the source of that context manager, it just toggles this variable
+                model.require_backward_grad_sync = micro_step == accum_steps - 1
+            with self.ctx:
+                logits, loss = model(xb, yb)
+                # scale the loss to account for gradient accumulation
+                loss = loss / accum_steps
+
+            # Delete the input batch tensors immediately
+            del xb, yb
+
+            # backward pass, with gradient scaling if training in fp16
+            self.scaler.scale(loss).backward()
+        # clip the gradient
+        if self.cfg.grad_clip != 0.0:
+            self.scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), self.cfg.grad_clip)
+        # step the optimizer and scaler if training in fp16
+        self.scaler.step(optimizer)
+        self.scaler.update()
+        # flush the gradients as soon as we can, no need for this memory anymore
+        optimizer.zero_grad(set_to_none=True)
+
+        # Clear memory immediately
         gc.collect()
         torch.cuda.empty_cache()
 
