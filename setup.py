@@ -9,7 +9,7 @@ setup(
     url="https://github.com/christyxgeorge/minigpt",
     packages=find_packages(),
     install_requires=[
-        "semver=3.0.1"
+        "semver=3.0.1",
         "kaggle==1.5.16",
         "numpy",  # ==1.25.2
         "pandas",  # ==2.1.0
