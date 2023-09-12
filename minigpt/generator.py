@@ -14,11 +14,10 @@ TORCH_MANUAL_SEED = 1337
 class GPTGenerator:
     def __init__(self, args):
         torch.manual_seed(1337)
-        self.out_dir = args.out_dir
         self.num_tokens = args.tokens
         self.verbose = args.verbose
-        self.tdata = BaseDataset.get_loader(args.source, args.data_dir, verbose=False, load=True)
-        checkpoint = self.load_checkpoint(args.model_id, args.source)
+        self.tdata = BaseDataset.get_loader(args.source, args.work_dir, verbose=False, load=True)
+        checkpoint = self.load_checkpoint(args.model_id, args.work_dir)
         self.cfg = checkpoint["config"]
         state_dict = checkpoint["model"]
         unwanted_prefix = "_orig_mod."
@@ -34,16 +33,14 @@ class GPTGenerator:
         generator = GPTGenerator(args)
         generator.generate_text(args.start_with)
 
-    def load_checkpoint(self, model_id, source):
-        out_dir = self.out_dir / source
+    def load_checkpoint(self, model_id, work_dir):
+        checkpoint_dir = work_dir / "checkpoints"
         model_name = ModelConfig.modelname_fromid(model_id).lower()
-        ckpt_path = os.path.join(out_dir, f"{model_name}.ckpt.pt")
+        ckpt_path = work_dir / f"{model_name}.ckpt.pt"
         device = ModelConfig.default_device()
         checkpoint = torch.load(ckpt_path, map_location=device)
         return checkpoint
 
     def generate_text(self, start_with):
         # Generate Text
-        self.model.generate_text(
-            self.tdata, self.cfg, num_tokens=self.num_tokens, start_with=start_with
-        )
+        self.model.generate_text(self.tdata, num_tokens=self.num_tokens, start_with=start_with)

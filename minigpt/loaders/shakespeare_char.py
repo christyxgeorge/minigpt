@@ -8,13 +8,13 @@ class TinyShakespeareCharData(BaseDataset):
         """Return the dataset name"""
         return "Tiny Shakespeare (Character tokens)"
 
-    def download(self):
+    def download(self, force=False):
         # download the tiny shakespeare dataset
         # data_url = "https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt"
         data_url = (
             "https://raw.githubusercontent.com/christyxgeorge/datasets/main/tiny_shakespeare.txt"
         )
-        self.download_url("spotify_millsongdata.csv", data_url)
+        self.download_url("tiny_shakespeare.txt", data_url)
 
     def get_metadata(self):
         """Get metadata to save alongwith train/val.bin"""

@@ -24,6 +24,7 @@ Pending things and issues encountered
 - Sample Generation can also be moved to DDP, if possible?
 - Tinystories processing.
 - Async prefetch of get_batch, local_iter_num??
+- profile?
 
 Need to check/understand the following
 

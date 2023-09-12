@@ -11,7 +11,7 @@ class SpotifyMillionSongsData(BaseDataset):
         """Return the dataset name"""
         return "Spotify Million Songs"
 
-    def download(self):
+    def download(self, force=False):
         # download the spotify million songs dataset (git lfs link)
         data_url = "https://media.githubusercontent.com/media/christyxgeorge/datasets/main/spotify_millsongdata.csv"
         self.download_url("spotify_millsongdata.csv", data_url)

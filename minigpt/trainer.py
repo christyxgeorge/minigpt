@@ -44,7 +44,7 @@ class GPTTrainer:
 
         self.verbose = args.verbose
         self.tdata = BaseDataset.get_loader(
-            args.source, args.data_dir, verbose=self.verbose, load=True
+            args.source, args.work_dir, verbose=self.verbose, load=True
         )
         self.cfg = ModelConfig(
             **vars(args), vocab_size=self.tdata.vocab_size, local_rank=self.local_rank
@@ -189,10 +189,10 @@ class GPTTrainer:
             "best_val_loss": val_loss,
             "config": self.cfg,
         }
-        out_dir = self.cfg.out_dir / self.cfg.source
-        logger.info(f"Saving model checkpoint to {out_dir}")
-        out_dir.mkdir(parents=True, exist_ok=True)  # Create, if not exists.
-        torch.save(checkpoint, os.path.join(out_dir, f"{self.model.name}.ckpt.pt"))
+        checkpoint_dir = self.cfg.work_dir / "checkpoints"
+        logger.info(f"Saving model checkpoint to {checkpoint_dir}")
+        checkpoint_dir.mkdir(parents=True, exist_ok=True)  # Create, if not exists.
+        torch.save(checkpoint, checkpoint_dir / f"{self.model.name}.ckpt.pt")
 
     def wandb_init(self):
         if self.cfg.wandb_log and self.master_process:
@@ -324,6 +324,7 @@ class GPTTrainer:
             else DDP(model)
         )
         raw_model = model.module  # unwrap DDP container if needed
+        running_flops = -1
 
         if self.master_process:
             self.print_training_info()
@@ -342,23 +343,32 @@ class GPTTrainer:
                 param_group["lr"] = lr
 
             if step and step % self.cfg.eval_interval == 0:
-                self.print_estimate_loss(step, eval_start_time=eval_start_time, lr=lr, flops=flops)
+                self.print_estimate_loss(
+                    step, eval_start_time=eval_start_time, lr=lr, flops=running_flops
+                )
                 eval_start_time = time.time()
 
             t0 = time.time()
-            self.train_gradient_accum(model, optimizer, self.cfg.gradient_accumulation_steps)
+            loss = self.train_gradient_accum(
+                model, optimizer, self.cfg.gradient_accumulation_steps
+            )
             dt = time.time() - t0
 
-            if step and step % self.cfg.eval_interval == 0 and master_process:
+            if step and step % self.cfg.eval_interval == 0 and self.master_process:
                 # get loss as float. note: this is a CPU-GPU sync point
                 # scale up to undo the division above, approximating the true total loss (exact would have been a sum)
                 # let the training loop settle a bit [step > 0]
                 lossf = loss.item() * self.cfg.gradient_accumulation_steps
                 flops_achieved = raw_model.flops_achieved(
-                    batch_size * gradient_accumulation_steps, dt
+                    self.cfg.batch_size * gradient_accumulation_steps, dt
+                )
+                running_flops = (
+                    flops_achieved
+                    if running_flops == -1
+                    else 0.9 * running_flops + 0.1 * flops_achieved
                 )
                 print(
-                    f"iter {step}: loss {lossf:.4f}, time {dt*1000:.2f}ms, flops {flops_achieved:.2f}%"
+                    f"iter {step}: loss {lossf:.4f}, time {dt*1000:.2f}ms, flops {(flops_achieved / 1e-6):.4f} MFlops"
                 )
             if self.cfg.eval_only:
                 break
@@ -461,6 +471,7 @@ class GPTTrainer:
         # Clear memory immediately
         gc.collect()
         torch.cuda.empty_cache()
+        return loss
 
     def setup_ddp(self):
         # Setup MASTER_ADDR/MASTER_PORT for default init_method env://

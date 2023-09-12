@@ -34,15 +34,16 @@ def get_args():
         "--source",
         choices=BaseDataset.loaders(),
     )
-    common_parser.add_argument("--data-dir", dest="data_dir")
-    common_parser.add_argument("--out-dir", dest="out_dir")
+    common_parser.add_argument("--work-dir", dest="work_dir")
     common_parser.add_argument("-v", "--verbose", action="store_true", default=False)
 
     # Sub-parser for getting options to download the data
-    _down_parser = subparsers.add_parser("download", parents=[common_parser])
+    down_parser = subparsers.add_parser("download", parents=[common_parser])
+    down_parser.add_argument("-f", "--force", action="store_true", default=False)
 
     # Sub-parser for getting options to prepare the data
-    _prep_parser = subparsers.add_parser("prepare", parents=[common_parser])
+    prep_parser = subparsers.add_parser("prepare", parents=[common_parser])
+    prep_parser.add_argument("-f", "--force", action="store_true", default=False)
 
     # Sub-parser for getting options to  train
     train_parser = subparsers.add_parser("train", parents=[common_parser])
@@ -57,8 +58,8 @@ def get_args():
 
     train_parser.add_argument("--wandb", dest="wandb", default="off")
     train_parser.add_argument("--no-ddp", dest="use_ddp", action="store_false", default=True)
-    train_parser.add_argument("--compile", action="store_true", default=False)
     train_parser.add_argument("--eval-only", dest="eval_only", action="store_true", default=False)
+    train_parser.add_argument("--compile", action="store_true", default=False)
     train_parser.add_argument("--decay-lr", dest="decay_lr", action="store_true", default=False)
 
     # Sub-parser for getting options to  generate
@@ -98,20 +99,19 @@ if __name__ == "__main__":
     set_env(args.verbose)
 
     path = Path(__file__)
-    root_dir = path.parent.absolute()
-    args.data_dir = Path(args.data_dir) if args.data_dir else root_dir / "data"
-    args.out_dir = Path(args.out_dir) if args.out_dir else root_dir / "checkpoints"
+    root_dir = path.parent.absolute() / "data"
+    args.work_dir = Path(args.work_dir) if args.work_dir else root_dir
+    args.work_dir = args.work_dir / args.source
 
     ## Create directories if they dont exist
-    args.data_dir.mkdir(parents=True, exist_ok=True)
-    args.out_dir.mkdir(parents=True, exist_ok=True)
+    args.work_dir.mkdir(parents=True, exist_ok=True)
 
     if command == "download":
-        loader = BaseDataset.get_loader(args.source, args.data_dir, verbose=args.verbose)
-        loader.download()
+        loader = BaseDataset.get_loader(args.source, args.work_dir, verbose=args.verbose)
+        loader.download(args.force)
     elif command == "prepare":  ## Create train.bin, val.bin
-        loader = BaseDataset.get_loader(args.source, args.data_dir, verbose=args.verbose)
-        loader.prepare()
+        loader = BaseDataset.get_loader(args.source, args.work_dir, verbose=args.verbose)
+        loader.prepare(args.force)
     elif command == "train":
         GPTTrainer.train(args)
     elif command == "generate":

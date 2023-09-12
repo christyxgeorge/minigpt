@@ -83,7 +83,7 @@ class LanguageModelBase(nn.Module):
         # see PaLM paper Appendix B as ref: https://arxiv.org/abs/2204.02311
         N = self.get_num_params()
         cfg = self.cfg
-        L, H, Q, T = cfg.n_layer, cfg.n_head, cfg.n_embd // cfg.n_head, cfg.block_size
+        L, H, Q, T = cfg.n_layers, cfg.n_heads, cfg.n_embed // cfg.n_heads, cfg.block_size
         flops_per_token = 6 * N + 12 * L * H * Q * T
         flops_per_fwdbwd = flops_per_token * T
         flops_per_iter = flops_per_fwdbwd * fwdbwd_per_iter
@@ -109,29 +109,28 @@ class LanguageModelBase(nn.Module):
             loss = F.cross_entropy(logits, targets)
         return loss
 
-    def generate_text(self, tdata, cfg, num_tokens=200, start_with=None):
+    def generate_text(self, tdata, num_tokens=200, start_with=None):
         print("=" * 100)
         print(f"  Generating Text [{num_tokens} tokens]")
         print("=" * 100)
-        ## Create the initial 'text' to generate the continuation --> Using 0 = \n
-        idx = torch.zeros((1, 1), dtype=torch.long, device=cfg.device)
-        # if start_with:
-        #     num_tokens = self.tdata.encode(idx)
-        #     idx = torch.zeros((1, 1), dtype=torch.long, device=cfg.device)
-        # else:
-        #     idx = torch.zeros((1, 1), dtype=torch.long, device=cfg.device)
-        tokens = self.generate(cfg, idx, num_tokens=num_tokens)
+        ## Create the initial 'text' to generate the continuation --> Using 0 = \n or ` start_with`
+        if start_with:
+            tokens = self.tdata.encode(idx)
+            idx = torch.tensor(tokens, dtype=torch.long, device=device)
+        else:
+            idx = torch.zeros((1, 1), dtype=torch.long, device=self.cfg.device)
+        tokens = self.generate(idx, num_tokens=num_tokens)
         print(tdata.decode(tokens[0].tolist()))
         print("=" * 100)
 
     @torch.no_grad()
-    def generate(self, cfg, idx, num_tokens, temperature=1.0, top_k=None):
+    def generate(self, idx, num_tokens, temperature=1.0, top_k=None):
         """Generate next `num_tokens` tokens, idx --> B x T"""
         for _i in range(num_tokens):
             # print(f"Generating {i} token...")
             # crop idx to the last block size tokens [Remove extra tokens from the beginning!]
             # because positional encodings are defined only upto block_size
-            idx_cond = idx[:, -cfg.block_size :]
+            idx_cond = idx[:, -self.cfg.block_size :]
 
             # get the predictions/losses
             logits, _loss = self(idx_cond)  ## logits --> B x T x C

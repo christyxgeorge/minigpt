@@ -8,6 +8,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime
 
 import psutil
+import semver
 import torch
 import torch.nn as nn
 from minigpt.models import (
@@ -38,8 +39,7 @@ logger = logging.getLogger(__name__)
 class ModelConfig:
     # Need type annotations for all fields. asdict returns ony fields with type annotations!
     vocab_size: int
-    data_dir: pathlib.PosixPath  # Data directory for the input files
-    out_dir: pathlib.PosixPath
+    work_dir: pathlib.PosixPath  # Working directory
     source: str
     verbose: bool = False
 
@@ -70,12 +70,11 @@ class ModelConfig:
     compile: bool = False  ## use PyTorch 2.0 to compile the model to be faster
     profile: bool = False  # use pytorch profiler, or just simple benchmarking?
 
-    device_type: str = "cpu"
-    device = None
-
     use_ddp: bool = False
     local_rank: int = 0
     ddp_device: str = "gloo"  ## "xla" for TPU, "nccl" for CUDA, "gloo" for CPU
+    device_type: str = "cpu"
+    device = None
 
     eval_interval: int = 200
     eval_iters: int = 200
@@ -85,9 +84,18 @@ class ModelConfig:
 
     def __post_init__(self):
         # Setup Device and Evaluation Parameters
-        self.device_type = "cuda" if torch.cuda.is_available() else "cpu"
+        if torch.cuda.is_available():
+            self.device_type = "cuda"
+            self.ddp_device = "nccl"
+            if torch.cuda.device_count() > 1:
+                self.use_ddp = True
+        else:
+            self.device_type = "cpu"
+            self.ddp_device = "gloo"
+
+        ver = semver.Version.parse(torch.__version__)
+        self.compile = True if self.compile and ver.major >= 2 else False
         self.device = torch.device(self.device_type + f":{self.local_rank}")
-        self.ddp_device = "nccl" if torch.cuda.is_available() else "gloo"
         if self.device_type == "cpu":
             n_cores = psutil.cpu_count(logical=False)
             os.environ["OMP_NUM_THREADS"] = f"{n_cores}"
