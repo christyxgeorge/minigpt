@@ -14,8 +14,6 @@ Pending things and issues encountered
 - Resume learning, checkpointing
 - Load from GPT2 weights
 - crop down the model block size (why?)
-- micro_step in range(gradient_accumulation_steps)
-- running_mfu
 - Support for TPU/XLA
 - Track gradients on WANDB (wandb.watch)
 - wandb.watch to see if model parameters and model architecture can be seen

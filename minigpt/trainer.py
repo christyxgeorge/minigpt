@@ -323,7 +323,7 @@ class GPTTrainer:
             if self.cfg.device_type == "cuda"
             else DDP(model)
         )
-        raw_model = model.module if ddp else model  # unwrap DDP container if needed
+        raw_model = model.module  # unwrap DDP container if needed
 
         if self.master_process:
             self.print_training_info()
@@ -337,7 +337,7 @@ class GPTTrainer:
         eval_start_time = time.time()
         for step in range(self.cfg.max_iters):  ## `n` steps
             # determine and set the learning rate for this iteration
-            lr = get_lr(step) if decay_lr else self.cfg.learning_rate
+            lr = get_lr(step) if self.cfg.decay_lr else self.cfg.learning_rate
             for param_group in optimizer.param_groups:
                 param_group["lr"] = lr
 
@@ -353,13 +353,13 @@ class GPTTrainer:
                 # get loss as float. note: this is a CPU-GPU sync point
                 # scale up to undo the division above, approximating the true total loss (exact would have been a sum)
                 # let the training loop settle a bit [step > 0]
-                lossf = loss.item() * gradient_accumulation_steps
+                lossf = loss.item() * self.cfg.gradient_accumulation_steps
                 flops_achieved = raw_model.flops_achieved(
                     batch_size * gradient_accumulation_steps, dt
                 )
-            print(
-                f"iter {step}: loss {lossf:.4f}, time {dt*1000:.2f}ms, flops {flops_achieved:.2f}%"
-            )
+                print(
+                    f"iter {step}: loss {lossf:.4f}, time {dt*1000:.2f}ms, flops {flops_achieved:.2f}%"
+                )
             if self.cfg.eval_only:
                 break
 

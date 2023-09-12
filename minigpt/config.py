@@ -79,7 +79,7 @@ class ModelConfig:
 
     eval_interval: int = 200
     eval_iters: int = 200
-    eval_only = False  # if True, script exits right after the first eval
+    eval_only: bool = False  # if True, script exits right after the first eval
 
     wandb: str = "off"  # "on", "overwrite", "off"
 
