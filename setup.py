@@ -10,8 +10,8 @@ setup(
     packages=["minigpt"],
     install_requires=[
         "kaggle==1.5.16",
-        "numpy==1.25.2",
-        "pandas==2.1.0",
+        "numpy",  # ==1.25.2
+        "pandas",  # ==2.1.0
         "psutil==5.9.5",
         "Requests==2.31.0",
         "sentencepiece==0.1.99",
