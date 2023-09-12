@@ -12,8 +12,8 @@ class SpotifyMillionSongsData(BaseDataset):
         return "Spotify Million Songs"
 
     def download(self):
-        # download the spotify million songs dataset
-        data_url = "https://raw.githubusercontent.com/christyxgeorge/datasets/main/spotify_millsongdata.csv"
+        # download the spotify million songs dataset (git lfs link)
+        data_url = "https://media.githubusercontent.com/media/christyxgeorge/datasets/main/spotify_millsongdata.csv"
         self.download_url("spotify_millsongdata.csv", data_url)
 
     def download_kaggle(self):
