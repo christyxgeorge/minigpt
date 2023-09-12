@@ -118,7 +118,7 @@ class TinyStoriesData(BaseDataset):
         # 2) train the sentencepiece model
         print("Will now train the vocab...")
         spm.SentencePieceTrainer.train(
-            input=tiny_file,
+            input=str(tiny_file),
             model_prefix=prefix,
             model_type="bpe",
             vocab_size=vocab_size,
