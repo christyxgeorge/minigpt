@@ -32,6 +32,10 @@ MODELS = {
     7: GPTLanguageModelv7,
 }
 
+# Note: P100 does not support Mixed Precision...
+# Check https://www.xcelerit.com/computing-benchmarks/insights/benchmarks-deep-learning-nvidia-p100-vs-v100-gpu/
+F16_TFLOPS = {"TPU v2": 100, "A100": 312, "V100": 112, "P100": 18.7, "T4": 65}
+
 logger = logging.getLogger(__name__)
 
 

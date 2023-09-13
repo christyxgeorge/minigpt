@@ -11,10 +11,11 @@ Adapted from NanoGPT [https://github.com/karpathy/nanoGPT]
 Pending things and issues encountered
 
 - Learning Decay
-- Resume learning, checkpointing
+- Resume learning (with local_iter_num), checkpointing (best_loss_val)
 - Load from GPT2 weights
 - crop down the model block size (why?)
-- Support for TPU/XLA
+- Support for TPU/XLA --> torch_xla.multiprocessing as xmp, bfloat16 supported.
+  - Number of cores, memory??
 - Track gradients on WANDB (wandb.watch)
 - wandb.watch to see if model parameters and model architecture can be seen
 - Check Pytorch 2.0 compile!
@@ -25,6 +26,8 @@ Pending things and issues encountered
 - Tinystories processing.
 - Async prefetch of get_batch, local_iter_num??
 - profile?
+- where was it run???
+- gpu_model to compute mfu properly (t4, p100, v100, a100, h100, tpu v2, v3...)
 
 Need to check/understand the following
 

@@ -42,7 +42,7 @@ class LanguageModelBase(nn.Module):
             n_params -= self.position_embedding_table.weight.numel()
         return n_params
 
-    def configure_optimizers(self, cfg, master_process=True):
+    def configure_optimizers(self, master_process=True):
         # start with all of the candidate parameters
         param_dict = {pn: p for pn, p in self.named_parameters()}
         # filter out those that do not require grad
@@ -52,18 +52,18 @@ class LanguageModelBase(nn.Module):
         decay_params = [p for n, p in param_dict.items() if p.dim() >= 2]
         nodecay_params = [p for n, p in param_dict.items() if p.dim() < 2]
         optim_groups = [
-            {"params": decay_params, "weight_decay": cfg.weight_decay},
+            {"params": decay_params, "weight_decay": self.cfg.weight_decay},
             {"params": nodecay_params, "weight_decay": 0.0},
         ]
         num_decay_params = sum(p.numel() for p in decay_params)
         num_nodecay_params = sum(p.numel() for p in nodecay_params)
         # Create AdamW optimizer and use the fused version if it is available
         fused_available = "fused" in inspect.signature(torch.optim.AdamW).parameters
-        use_fused = fused_available and cfg.device_type == "cuda"
+        use_fused = fused_available and self.cfg.device_type == "cuda"
         extra_args = dict(fused=True) if use_fused else dict()
-        betas = (cfg.beta1, cfg.beta2)
+        betas = (self.cfg.beta1, self.cfg.beta2)
         optimizer = torch.optim.AdamW(
-            optim_groups, lr=cfg.learning_rate, betas=betas, **extra_args
+            optim_groups, lr=self.cfg.learning_rate, betas=betas, **extra_args
         )
         # Log pertinent information
         if master_process:
@@ -77,8 +77,8 @@ class LanguageModelBase(nn.Module):
 
         return optimizer
 
-    def flops_achieved(self, fwdbwd_per_iter, dt):
-        """Compute the achieved flops. Based on the GPU, we can figure out the MFU"""
+    def mflops_achieved(self, fwdbwd_per_iter, dt):
+        """Compute the achieved mflops. Based on the GPU, we can figure out the MFU"""
         # first estimate the number of flops we do per iteration.
         # see PaLM paper Appendix B as ref: https://arxiv.org/abs/2204.02311
         N = self.get_num_params()
@@ -92,7 +92,7 @@ class LanguageModelBase(nn.Module):
         # estimate model flops utilization (MFU) in units of A100 bfloat16 peak FLOPS
         # flops_promised = 312e12  # A100 GPU bfloat16 peak flops is 312 TFLOPS
         # mfu = flops_achieved / flops_promised
-        return flops_achieved
+        return flops_achieved / 1e6
 
     def compute_loss(
         self, logits: torch.Tensor, targets: torch.Tensor | None = None

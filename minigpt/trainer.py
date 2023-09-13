@@ -124,7 +124,7 @@ class GPTTrainer:
         print("=" * 100)
 
     @torch.no_grad()
-    def print_estimate_loss(self, iter, eval_start_time=None, lr=None, flops=0):
+    def print_estimate_loss(self, iter, eval_start_time=None, **kwargs):
         xlosses = {}
         if not self.master_process:  # Nothing to do if not master process
             return xlosses
@@ -155,8 +155,8 @@ class GPTTrainer:
         if eval_start_time:
             xlosses["eval_time"] = eval_time
             xlosses["est_time"] = estimation_time
-        xlosses["lr"] = lr or self.cfg.learning_rate
-        xlosses["flops"] = flops
+        kwargs["lr"] = kwargs.get("lr", self.cfg.learning_rate)
+        xlosses.update(kwargs)
         if self.cfg.wandb_log and self.master_process:
             wandb.log(xlosses, step=iter)
         return xlosses
@@ -305,7 +305,7 @@ class GPTTrainer:
         #     model_args['block_size'] = block_size # so that the checkpoint will have the right value
         #     model.to(device)
 
-        optimizer = self.model.configure_optimizers(self.cfg, master_process=self.master_process)
+        optimizer = self.model.configure_optimizers(master_process=self.master_process)
         # if init_from == "resume":
         #     optimizer.load_state_dict(checkpoint["optimizer"])
         # checkpoint = None  # free up memory
@@ -324,7 +324,7 @@ class GPTTrainer:
             else DDP(model)
         )
         raw_model = model.module  # unwrap DDP container if needed
-        running_flops = -1
+        running_mflops = -1
 
         if self.master_process:
             self.print_training_info()
@@ -344,7 +344,7 @@ class GPTTrainer:
 
             if step and step % self.cfg.eval_interval == 0:
                 self.print_estimate_loss(
-                    step, eval_start_time=eval_start_time, lr=lr, flops=running_flops
+                    step, eval_start_time=eval_start_time, lr=lr, mflops=running_mflops
                 )
                 eval_start_time = time.time()
 
@@ -359,16 +359,22 @@ class GPTTrainer:
                 # scale up to undo the division above, approximating the true total loss (exact would have been a sum)
                 # let the training loop settle a bit [step > 0]
                 lossf = loss.item() * self.cfg.gradient_accumulation_steps
-                flops_achieved = raw_model.flops_achieved(
+                mflops_achieved = raw_model.mflops_achieved(
                     self.cfg.batch_size * gradient_accumulation_steps, dt
                 )
-                running_flops = (
-                    flops_achieved
-                    if running_flops == -1
-                    else 0.9 * running_flops + 0.1 * flops_achieved
+                running_mflops = (
+                    mflops_achieved
+                    if running_mflops == -1
+                    else 0.9 * running_mflops + 0.1 * mflops_achieved
                 )
+                if self.cfg.wandb_log and self.master_process:
+                    wandb.log(
+                        {"mflops_achieved": mflops_achieved, "running_mflops": running_mflops},
+                        step=step,
+                    )
+
                 print(
-                    f"iter {step}: loss {lossf:.4f}, time {dt*1000:.2f}ms, flops {(flops_achieved / 1e-6):.4f} MFlops"
+                    f"iter {step}: loss {lossf:.4f}, time {dt*1000:.2f}ms, flops {mflops_achieved:.4f} MFlops, running mflops = {running_mflops:.4f}"
                 )
             if self.cfg.eval_only:
                 break
