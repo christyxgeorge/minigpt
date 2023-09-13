@@ -197,7 +197,7 @@ class TinyStoriesData(BaseDataset):
         vocab_size = 0 designates the default Llama 2 tokenizer, in that case
         None is returned.
         """
-        return None if vocab_size == 0 else self.work_dir / f"tok{vocab_size}.model"
+        return None if vocab_size == 0 else str(self.work_dir / f"tok{vocab_size}.model")
 
 
 class Task:

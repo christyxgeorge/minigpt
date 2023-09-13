@@ -2,7 +2,7 @@ from setuptools import find_packages, setup
 
 setup(
     name="minigpt",
-    version="1.0.5",
+    version="1.0.6",
     description="Experiments using NanoGPT",
     author="Christy George",
     author_email="christy.george@gmail.com",

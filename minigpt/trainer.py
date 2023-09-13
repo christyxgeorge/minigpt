@@ -343,9 +343,7 @@ class GPTTrainer:
                 param_group["lr"] = lr
 
             if step and step % self.cfg.eval_interval == 0:
-                self.print_estimate_loss(
-                    step, eval_start_time=eval_start_time, lr=lr, mflops=running_mflops
-                )
+                self.print_estimate_loss(step, eval_start_time=eval_start_time, lr=lr)
                 eval_start_time = time.time()
 
             t0 = time.time()
