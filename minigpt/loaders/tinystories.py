@@ -25,12 +25,20 @@ NUM_DATA_FILES = 50
 
 class TinyStoriesData(BaseDataset):
     def __init__(self, src, work_dir, verbose=False):
-        super().__init__(src, work_dir, verbose=verbose)
         self.vocab_size = 2048
-        self.max_seq_len = 256
         self.iter_batches = {"train": None, "val": None}
         self.iter_val_batches = None
         self.vocab_source = "llama2"  # llama2|custom;
+        if self.vocab_source == "llama2":
+            # .bin files will be saved into llama2 directory, create it once here
+            self.bin_dir = work_dir / f"llama2"
+        else:
+            # .bin files will be saved into tok{N} directory, create it once here
+            self.bin_dir = work_dir / f"tok{vocab_size}"
+        os.makedirs(self.bin_dir, exist_ok=True)
+
+        # Setup internal variables before calling super().__init__()
+        super().__init__(src, work_dir, verbose=verbose)
 
     @property
     def name(self) -> str:
@@ -39,14 +47,14 @@ class TinyStoriesData(BaseDataset):
 
     def is_prepared(self) -> bool:
         """Check if the data(bin_files) have been prepared"""
-        bin_dir = self.work_dir / "tok{self.vocab_size}"
-        data_glob = os.path.join(bin_dir, "data*.bin")
-        print(f"Bin Dir = {bin_dir}, glob = {data_glob}")
+        data_glob = os.path.join(self.bin_dir, "data*.bin")
+        print(f"Bin Dir = {self.bin_dir}, glob = {data_glob}")
         files = glob.glob(data_glob)
         return len(files) == NUM_DATA_FILES
 
     def download(self, force=False):
         """Downloads the TinyStories dataset to work_dir"""
+        start_time = time.time()
         os.makedirs(self.work_dir, exist_ok=True)
 
         # download the TinyStories dataset, unless it's already downloaded
@@ -76,9 +84,9 @@ class TinyStoriesData(BaseDataset):
         shard_filenames = sorted(glob.glob(os.path.join(data_dir, "*.json")))
         with open(shard_filenames[0], "r") as f:
             data = json.load(f)
-        print("Download done.")
-        print(f"Number of shards: {len(shard_filenames)}")
-        print(f"Example story:\n{data[0]}")
+        print(f"Number of shards: {len(shard_filenames)}\nExample story:\n{data[0]}")
+        elapsed_time = time.time() - start_time
+        print("Download Done, Time taken = {elapsed_time:.3f} secs")
 
     def prepare(self, force=False):
         """Create train.bin and val.bin files"""
@@ -102,20 +110,21 @@ class TinyStoriesData(BaseDataset):
     def get_batch(self, cfg, split) -> tuple[torch.Tensor, torch.Tensor]:
         """Batch Size = Number of sequences being processed in parallel!"""
         if self.iter_batches[split] is None:
-            iter_batches = self.get_iter_batches()
+            iter_batches = self.get_iter_batches(cfg)
             self.iter_batches[split] = iter_batches(split=split)
 
         batch_iter = self.iter_batches[split]
         xb, yb = next(batch_iter)
         return xb, yb
 
-    def get_iter_batches(self):
+    def get_iter_batches(self, cfg):
         return partial(
             Task.iter_batches,
             batch_size=cfg.batch_size,
-            max_seq_len=self.max_seq_len,
+            max_seq_len=cfg.block_size,
             vocab_size=self.vocab_size,
             vocab_source=self.vocab_source,
+            bin_dir=self.bin_dir,
             device=cfg.device,
             num_workers=0,
         )
@@ -135,6 +144,8 @@ class TinyStoriesData(BaseDataset):
         where N is the vocab size. This is also where the pretok .bin files will go.
         """
         assert vocab_size > 0, "Vocab size must be positive"  # nosec
+
+        start_time = time.time()
 
         # output file prefix path for sentencepiece
         prefix = self.work_dir / f"tok{vocab_size}"
@@ -179,8 +190,8 @@ class TinyStoriesData(BaseDataset):
         )
 
         os.remove(tiny_file)
-        print(f"Deleted {tiny_file}")
-        print(f"Trained tokenizer is in {prefix}.model")
+        elapsed_time = time.time() - start_time
+        print(f"Trained tokenizer is in {prefix}.model, Time taken = {elapsed_time:.3f} secs")
 
     def get_metadata(self):
         """Get metadata to save alongwith train/val.bin"""
@@ -202,36 +213,29 @@ class TinyStoriesData(BaseDataset):
 
     def pretokenize(self, vocab_size):
         # iterate the shards and tokenize all of them one by one
+        start_time = time.time()
         data_dir = self.work_dir / "TinyStories_all_data"
         shard_filenames = sorted(glob.glob(os.path.join(data_dir, "*.json")))
-        if vocab_size > 0:
-            # .bin files will be saved into tok{N} directory, create it once here
-            bin_dir = self.work_dir / f"tok{vocab_size}"
-            os.makedirs(bin_dir, exist_ok=True)
 
         # process all the shards in a process pool
-        fun = partial(self.process_shard, vocab_size=vocab_size, bin_dir=bin_dir)
+        fun = partial(self.process_shard, vocab_size=vocab_size)
         with ProcessPoolExecutor() as executor:
             executor.map(fun, enumerate(shard_filenames))
-        print("Done.")
+        elapsed_time = time.time() - start_time
+        print("Pretokenization Done, Time taken = {elapsed_time:.3f} secs")
 
-    def check_file(self, bin_dir, shard):
-        if vocab_size == 0:
-            # if we're using Llama 2, just save the tokenized file in the same dir
-            tokenized_filename = shard.replace(".json", ".bin")
-        else:
-            # save .bin files into the tok{N} directory
-            shard_basename = os.path.basename(shard)
-            bin_basename = shard_basename.replace(".json", ".bin")
-            tokenized_filename = os.path.join(bin_dir, bin_basename)
+    def check_file(self, shard):
+        shard_basename = os.path.basename(shard)
+        bin_basename = shard_basename.replace(".json", ".bin")
+        tokenized_filename = os.path.join(self.bin_dir, bin_basename)
         file_exists = os.path.exists(tokenized_filename)
         return tokenized_filename, file_exists
 
-    def process_shard(self, args, vocab_size, bin_dir):
+    def process_shard(self, args, vocab_size):
         shard_id, shard = args
 
         # calculate the output filename and check if it exists
-        tokenized_filename, file_exists = self.check_file(bin_dir, shard)
+        tokenized_filename, file_exists = self.check_file(shard)
         if file_exists:
             print(f"Already saved {tokenized_filename}, skipping..")
             return
@@ -274,12 +278,13 @@ class Task:
 class PretokDataset(torch.utils.data.IterableDataset):
     """Loads pretokenized examples from disk and yields them as PyTorch tensors."""
 
-    def __init__(self, split, max_seq_len, vocab_size, vocab_source):
+    def __init__(self, split, max_seq_len, vocab_size, vocab_source, bin_dir):
         super().__init__()
         self.split = split
         self.max_seq_len = max_seq_len
         self.vocab_size = vocab_size
         self.vocab_source = vocab_source
+        self.bin_dir = bin_dir
 
     def __iter__(self):
         # get worker info within a DataLoader
@@ -290,15 +295,8 @@ class PretokDataset(torch.utils.data.IterableDataset):
         # combine the worker_id and worker_rank to create a unique seed for rng
         seed = 42 + worker_id + 1337 * rank
         rng = random.Random(seed)
-        print(f"Created a PretokDataset with rng seed {seed}")
-        if self.vocab_source == "llama2":
-            # the .bin files are right along the .json files
-            bin_dir = self.work_dir / "TinyStories_all_data"
-            shard_filenames = sorted(glob.glob(os.path.join(bin_dir, "*.bin")))
-        elif self.vocab_source == "custom":
-            # the .bin files are in tok{N} directory
-            bin_dir = self.work_dir / f"tok{self.vocab_size}"
-            shard_filenames = sorted(glob.glob(os.path.join(bin_dir, "*.bin")))
+        print(f"Created a PretokDataset for {self.split} data with rng seed {seed}")
+        shard_filenames = sorted(glob.glob(os.path.join(self.bin_dir, "*.bin")))
         # train/test split. let's use only shard 0 for test split, rest train
         shard_filenames = shard_filenames[1:] if self.split == "train" else shard_filenames[:1]
         assert len(shard_filenames) > 0, f"No bin files found in {bin_dir}"  # nosec

@@ -31,8 +31,10 @@ class TextDataset(BaseDataset):
     val_bin: str = "val.bin"
 
     def __init__(self, src, work_dir, filename, verbose=False):
-        super().__init__(src, work_dir, verbose=verbose)
         self.filename = self.work_dir / filename
+
+        # Setup internal variables before calling super().__init__()
+        super().__init__(src, work_dir, verbose=verbose)
 
     @staticmethod
     def default_loader():
