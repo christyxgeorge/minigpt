@@ -23,7 +23,7 @@ class GPTGenerator:
         iterations = checkpoint["iter_num"]
         best_val_loss = checkpoint["best_val_loss"]
         print(
-            f"Checkpoint restored. Trained for {iterations} iterations, Loss = {best_loss_value}"
+            f"Checkpoint restored. Trained for {iterations} iterations, Loss = {best_val_loss:.4f}"
         )
         unwanted_prefix = "_orig_mod."
         for k, _v in list(state_dict.items()):
@@ -41,7 +41,7 @@ class GPTGenerator:
     def load_checkpoint(self, model_id, work_dir):
         checkpoint_dir = work_dir / "checkpoints"
         model_name = ModelConfig.modelname_fromid(model_id).lower()
-        ckpt_path = work_dir / f"{model_name}.ckpt.pt"
+        ckpt_path = checkpoint_dir / f"{model_name}.ckpt.pt"
         device = ModelConfig.default_device()
         checkpoint = torch.load(ckpt_path, map_location=device)
         return checkpoint
