@@ -66,14 +66,13 @@ class TinyStoriesData(BaseDataset):
         """Create train.bin and val.bin files"""
         self.download(force=force)  # Download the file, if not available
         tokenizer_model = self.get_tokenizer_model_path(self.vocab_size)
-        print(f"Tokenizer Model = {tokenizer_model} / {type(tokenizer_model)}")
         if not os.path.exists(tokenizer_model):
             self.train_vocab(self.vocab_size)
         else:
             print(f"Tokenizer already trained: {tokenizer_model}, skipping")
         self.enc = Tokenizer(tokenizer_model)
-        self.pretokenize()
-        return False
+        self.pretokenize(self.vocab_size)
+        return True
 
     def load_token_ids(self) -> tuple[list[int], list[int]]:
         """Load Token IDs from Dataset"""
