@@ -65,9 +65,12 @@ class TinyStoriesData(BaseDataset):
     def prepare(self, force=False):
         """Create train.bin and val.bin files"""
         self.download(force=force)  # Download the file, if not available
-        self.train_vocab(self.vocab_size)
         tokenizer_model = self.get_tokenizer_model_path(self.vocab_size)
         print(f"Tokenizer Model = {tokenizer_model} / {type(tokenizer_model)}")
+        if not os.path.exists(tokenizer_model):
+            self.train_vocab(self.vocab_size)
+        else:
+            print(f"Tokenizer already trained: {tokenizer_model}, skipping")
         self.enc = Tokenizer(tokenizer_model)
         self.pretokenize()
         return False
