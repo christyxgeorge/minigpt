@@ -86,6 +86,8 @@ class ModelConfig:
 
     wandb: str = "off"  # "on", "overwrite", "off"
 
+    vocab_source: str = "llama2"  # used while tokenizing `tiny stories` dataset
+
     def __post_init__(self):
         # Setup Device and Evaluation Parameters
         if torch.cuda.is_available():

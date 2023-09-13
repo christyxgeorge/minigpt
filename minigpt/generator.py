@@ -16,7 +16,8 @@ class GPTGenerator:
         torch.manual_seed(1337)
         self.num_tokens = args.tokens
         self.verbose = args.verbose
-        self.tdata = BaseDataset.get_loader(args.source, args.work_dir, verbose=False, load=True)
+
+        self.tdata = BaseDataset.get_loader(args, load=True)
         checkpoint = self.load_checkpoint(args.model_id, args.work_dir)
         self.cfg = checkpoint["config"]
         state_dict = checkpoint["model"]

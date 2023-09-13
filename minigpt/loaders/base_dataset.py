@@ -93,18 +93,19 @@ class BaseDataset(ABC):
         """Get a batch of data"""
 
     @staticmethod
-    def get_loader(src, work_dir, verbose=False, load=False) -> BaseDataset:
+    def get_loader(args, load=False) -> BaseDataset:
         current_package = importlib.import_module(__package__)
-        cls_name = LOADERS.get(src)
+        cls_name = LOADERS.get(args.source)
         if cls_name:
             cls = getattr(current_package, cls_name)
-            loader = cls(src, work_dir, verbose=verbose)
+            loader = cls(args.source, args.work_dir, verbose=args.verbose)
             if load:
                 loader.load_data()
             return loader
         else:
-            logger.warn(f"Unknown Dataset Source: {src}")
-            raise ValueError(f"Unknown Dataset Source: {src} - Should be one of {LOADERS.keys()}")
+            error_msg = f"Unknown Dataset Source: {args.source} - Use one of {LOADERS.keys()}"
+            logger.warn(error_msg)
+            raise ValueError(error_msg)
 
     # Common utility
     def download_file(self, url: str, file_name: pathlib.PosixPath, chunk_size=1024):

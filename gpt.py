@@ -36,6 +36,13 @@ def get_args():
     )
     common_parser.add_argument("--work-dir", dest="work_dir")
     common_parser.add_argument("-v", "--verbose", action="store_true", default=False)
+    common_parser.add_argument(
+        "--vocab-source",
+        dest="vocab_source",
+        choices=["llama2", "custom"],
+        default="llama2",
+        help="Used by the tinystories dataset - Build a custom tokenizer, or use llama2 tokenizer",
+    )
 
     # Sub-parser for getting options to download the data
     down_parser = subparsers.add_parser("download", parents=[common_parser])
@@ -52,7 +59,7 @@ def get_args():
     train_parser.add_argument("-e", "--embedding", dest="n_embed", type=int, default=32)
     train_parser.add_argument("-l", "--layers", dest="n_layers", type=int, default=4)
     train_parser.add_argument("--heads", dest="n_heads", type=int, default=4)
-    train_parser.add_argument("-i", "--iterations", dest="max_iters", type=int, default=3000)
+    train_parser.add_argument("-i", "--max-iters", dest="max_iters", type=int, default=3000)
     train_parser.add_argument("-r", "--learning-rate", type=float, default=1e-3)
     train_parser.add_argument("-d", "--dropout", type=float, default=0.2)
 
@@ -107,10 +114,10 @@ if __name__ == "__main__":
     args.work_dir.mkdir(parents=True, exist_ok=True)
 
     if command == "download":
-        loader = BaseDataset.get_loader(args.source, args.work_dir, verbose=args.verbose)
+        loader = BaseDataset.get_loader(args)
         loader.download(args.force)
     elif command == "prepare":  ## Create train.bin, val.bin
-        loader = BaseDataset.get_loader(args.source, args.work_dir, verbose=args.verbose)
+        loader = BaseDataset.get_loader(args)
         loader.prepare(args.force)
     elif command == "train":
         GPTTrainer.train(args)

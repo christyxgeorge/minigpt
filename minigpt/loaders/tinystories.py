@@ -25,16 +25,17 @@ NUM_DATA_FILES = 50
 
 class TinyStoriesData(BaseDataset):
     def __init__(self, src, work_dir, verbose=False):
-        self.vocab_size = 2048
         self.iter_batches = {"train": None, "val": None}
         self.iter_val_batches = None
         self.vocab_source = "llama2"  # llama2|custom;
         if self.vocab_source == "llama2":
             # .bin files will be saved into llama2 directory, create it once here
             self.bin_dir = work_dir / f"llama2"
+            self.vocab_size = 32000  # the Llama 2 tokenizer has 32K tokens
         else:
             # .bin files will be saved into tok{N} directory, create it once here
             self.bin_dir = work_dir / f"tok{vocab_size}"
+            self.vocab_size = 2048
         os.makedirs(self.bin_dir, exist_ok=True)
 
         # Setup internal variables before calling super().__init__()

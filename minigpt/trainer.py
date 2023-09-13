@@ -43,9 +43,7 @@ class GPTTrainer:
         self.master_process = self.local_rank == 0
 
         self.verbose = args.verbose
-        self.tdata = BaseDataset.get_loader(
-            args.source, args.work_dir, verbose=self.verbose, load=True
-        )
+        self.tdata = BaseDataset.get_loader(args, load=True)
         self.cfg = ModelConfig(
             **vars(args), vocab_size=self.tdata.vocab_size, local_rank=self.local_rank
         )
@@ -65,10 +63,7 @@ class GPTTrainer:
             # mp.set_start_method("spawn")  # , force=True) # Not needed as we are only 'spawn'ing
             mp.spawn(
                 train_fn,
-                args=(
-                    args,
-                    world_size,
-                ),
+                args=(args, world_size),
                 nprocs=world_size,
                 join=True,
             )
@@ -255,6 +250,7 @@ class GPTTrainer:
                 break
 
         losses = self.print_estimate_loss(step + 1)
+
         elapsed_time = time.time() - start_time
         print("=" * 100)
         if elapsed_time < 60:
