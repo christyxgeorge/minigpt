@@ -13,7 +13,7 @@ from abc import ABC, abstractmethod
 import numpy as np
 import requests  # type: ignore
 import torch
-from tqdm import tqdm
+from tqdm.auto import tqdm  # Choose tqdm or tqdm_notebook based on env
 
 logger = logging.getLogger(__name__)
 

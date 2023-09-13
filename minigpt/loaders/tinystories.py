@@ -4,6 +4,7 @@ import glob
 import json
 import os
 import random
+import tarfile
 from concurrent.futures import ProcessPoolExecutor
 from functools import partial
 from pathlib import Path
@@ -14,7 +15,7 @@ import torch
 import torch.distributed as dist
 from minigpt.loaders.loader_base import BaseDataset
 from minigpt.loaders.tokenizer import Tokenizer
-from tqdm import tqdm
+from tqdm.auto import tqdm  # Choose tqdm or tqdm_notebook based on env
 
 # This is adapated from github/llama2.c/tinystories.py
 # https://github.com/karpathy/llama2.c/blob/master/tinystories.py
@@ -48,7 +49,10 @@ class TinyStoriesData(BaseDataset):
                 print(f"{data_filename} already exists, skipping download...")
             data_dir.mkdir(parents=True, exist_ok=True)
             print(f"Unpacking {data_filename}...")
-            os.system(f"tar -xzf {data_filename} -C {data_dir}")  # nosec
+            # os.system(f"tar -xzf {data_filename} -C {data_dir}")  # nosec
+            with tarfile.open(name="data/t_stories/TinyStories_all_data.tar.gz") as tar:
+                for member in tqdm(iterable=tar.getmembers(), total=len(tar.getmembers())):
+                    tar.extract(member=member)
             os.remove(data_filename)
             print(f"Deleted {data_filename}")
         else:
