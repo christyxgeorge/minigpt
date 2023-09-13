@@ -50,9 +50,9 @@ class TinyStoriesData(BaseDataset):
             data_dir.mkdir(parents=True, exist_ok=True)
             print(f"Unpacking {data_filename}...")
             # os.system(f"tar -xzf {data_filename} -C {data_dir}")  # nosec
-            with tarfile.open(name=data_filename) as tar:
+            with tarfile.open(name=data_filename, mode="r:gz") as tar:
                 for member in tqdm(iterable=tar.getmembers(), total=len(tar.getmembers())):
-                    tar.extract(member=member)
+                    tar.extract(member=member, path=data_dir)
             os.remove(data_filename)
             print(f"Deleted {data_filename}")
         else:
