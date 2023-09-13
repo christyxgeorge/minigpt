@@ -1,14 +1,24 @@
 """class for managing data from the tiny shakespeare dataset"""
 
 import tiktoken
-from minigpt.loaders.loader_base import BaseDataset
+from minigpt.loaders.text_dataset import TextDataset
 
 
-class TinyShakespeareWordData(BaseDataset):
+class TinyShakespeareWordData(TextDataset):
+    def __init__(self, src, work_dir, verbose=False):
+        super().__init__(src, work_dir, "tiny_shakespeare.txt", verbose=verbose)
+
     @property
     def name(self) -> str:
         """Return the dataset name"""
         return "Tiny Shakespeare (Word tokens)"
+
+    def is_prepared(self) -> bool:
+        """Check if the data(bin_files) have been prepared"""
+        bin_files_exist = (self.work_dir / self.train_bin).exists() and (
+            self.work_dir / self.val_bin
+        ).exists()
+        return bin_files_exist
 
     def download(self, force=False):
         # download the tiny shakespeare dataset
@@ -16,7 +26,7 @@ class TinyShakespeareWordData(BaseDataset):
         data_url = (
             "https://raw.githubusercontent.com/christyxgeorge/datasets/main/tiny_shakespeare.txt"
         )
-        self.download_url("tiny_shakespeare.txt", data_url)
+        self.download_file(data_url, self.filename)
 
     def get_metadata(self):
         """Get metadata to save alongwith train/val.bin"""

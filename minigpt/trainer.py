@@ -13,7 +13,7 @@ import torch.distributed as dist
 import torch.multiprocessing as mp
 import wandb
 from minigpt.config import ModelConfig
-from minigpt.loaders.loader_base import BaseDataset
+from minigpt.loaders.base_dataset import BaseDataset
 from torch.nn.parallel import DistributedDataParallel as DDP
 
 logger = logging.getLogger(__name__)
@@ -190,7 +190,7 @@ class GPTTrainer:
             "config": self.cfg,
         }
         checkpoint_dir = self.cfg.work_dir / "checkpoints"
-        logger.info(f"Saving model checkpoint to {checkpoint_dir}")
+        logger.info(f"Saving model checkpoint @ step {iter} to {checkpoint_dir}")
         checkpoint_dir.mkdir(parents=True, exist_ok=True)  # Create, if not exists.
         torch.save(checkpoint, checkpoint_dir / f"{self.model.name}.ckpt.pt")
 
@@ -251,6 +251,8 @@ class GPTTrainer:
                 self.print_estimate_loss(step, eval_start_time=eval_start_time)
                 eval_start_time = time.time()
             self.train_epoch(self.model, optimizer)
+            if self.cfg.eval_only:
+                break
 
         losses = self.print_estimate_loss(step + 1)
         elapsed_time = time.time() - start_time

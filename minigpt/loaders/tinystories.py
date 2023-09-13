@@ -13,23 +13,37 @@ import numpy as np
 import sentencepiece as spm
 import torch
 import torch.distributed as dist
-from minigpt.loaders.loader_base import BaseDataset
+from minigpt.loaders.base_dataset import BaseDataset
 from minigpt.loaders.tokenizer import Tokenizer
 from tqdm.auto import tqdm  # Choose tqdm or tqdm_notebook based on env
 
 # This is adapated from github/llama2.c/tinystories.py
 # https://github.com/karpathy/llama2.c/blob/master/tinystories.py
 
+NUM_DATA_FILES = 50
+
 
 class TinyStoriesData(BaseDataset):
     def __init__(self, src, work_dir, verbose=False):
         super().__init__(src, work_dir, verbose=verbose)
         self.vocab_size = 2048
+        self.max_seq_len = 256
+        self.iter_batches = {"train": None, "val": None}
+        self.iter_val_batches = None
+        self.vocab_source = "llama2"  # llama2|custom;
 
     @property
     def name(self) -> str:
         """Return the dataset name"""
         return "Tiny Stories"
+
+    def is_prepared(self) -> bool:
+        """Check if the data(bin_files) have been prepared"""
+        bin_dir = self.work_dir / "tok{self.vocab_size}"
+        data_glob = os.path.join(bin_dir, "data*.bin")
+        print(f"Bin Dir = {bin_dir}, glob = {data_glob}")
+        files = glob.glob(data_glob)
+        return len(files) == NUM_DATA_FILES
 
     def download(self, force=False):
         """Downloads the TinyStories dataset to work_dir"""
@@ -70,7 +84,9 @@ class TinyStoriesData(BaseDataset):
         """Create train.bin and val.bin files"""
         self.download(force=force)  # Download the file, if not available
         tokenizer_model = self.get_tokenizer_model_path(self.vocab_size)
-        if not os.path.exists(tokenizer_model):
+        if self.vocab_source == "llama2":
+            print(f"Using Llama2 Tokenizer, No need to train vocab")
+        elif not os.path.exists(tokenizer_model):
             self.train_vocab(self.vocab_size)
         else:
             print(f"Tokenizer already trained: {tokenizer_model}, skipping")
@@ -78,9 +94,31 @@ class TinyStoriesData(BaseDataset):
         self.pretokenize(self.vocab_size)
         return True
 
-    def load_token_ids(self) -> tuple[list[int], list[int]]:
-        """Load Token IDs from Dataset"""
-        raise NotImplementedError("Load Token Ids not supported!")
+    def load_data(self):
+        """Load Data from file"""
+        if not self.prepared:
+            raise NotImplementedError("Load Data not supported. Use prepare first!")
+
+    def get_batch(self, cfg, split) -> tuple[torch.Tensor, torch.Tensor]:
+        """Batch Size = Number of sequences being processed in parallel!"""
+        if self.iter_batches[split] is None:
+            iter_batches = self.get_iter_batches()
+            self.iter_batches[split] = iter_batches(split=split)
+
+        batch_iter = self.iter_batches[split]
+        xb, yb = next(batch_iter)
+        return xb, yb
+
+    def get_iter_batches(self):
+        return partial(
+            Task.iter_batches,
+            batch_size=cfg.batch_size,
+            max_seq_len=self.max_seq_len,
+            vocab_size=self.vocab_size,
+            vocab_source=self.vocab_source,
+            device=cfg.device,
+            num_workers=0,
+        )
 
     def encode(self, s) -> list[int]:
         """encode a string to a list of integers"""
@@ -154,6 +192,14 @@ class TinyStoriesData(BaseDataset):
         tokenizer_model = self.get_tokenizer_model_path(self.vocab_size)
         self.enc = Tokenizer(tokenizer_model)
 
+    def get_tokenizer_model_path(self, vocab_size):
+        """
+        Returns path to the sentencepiece tokenizer model for a given vocab size
+        vocab_size = 0 designates the default Llama 2 tokenizer, in that case
+        None is returned.
+        """
+        return None if vocab_size == 0 else str(self.work_dir / f"tok{vocab_size}.model")
+
     def pretokenize(self, vocab_size):
         # iterate the shards and tokenize all of them one by one
         data_dir = self.work_dir / "TinyStories_all_data"
@@ -164,13 +210,33 @@ class TinyStoriesData(BaseDataset):
             os.makedirs(bin_dir, exist_ok=True)
 
         # process all the shards in a process pool
-        fun = partial(self.process_shard, vocab_size=vocab_size)
+        fun = partial(self.process_shard, vocab_size=vocab_size, bin_dir=bin_dir)
         with ProcessPoolExecutor() as executor:
             executor.map(fun, enumerate(shard_filenames))
         print("Done.")
 
-    def process_shard(self, args, vocab_size):
+    def check_file(self, bin_dir, shard):
+        if vocab_size == 0:
+            # if we're using Llama 2, just save the tokenized file in the same dir
+            tokenized_filename = shard.replace(".json", ".bin")
+        else:
+            # save .bin files into the tok{N} directory
+            shard_basename = os.path.basename(shard)
+            bin_basename = shard_basename.replace(".json", ".bin")
+            tokenized_filename = os.path.join(bin_dir, bin_basename)
+        file_exists = os.path.exists(tokenized_filename)
+        return tokenized_filename, file_exists
+
+    def process_shard(self, args, vocab_size, bin_dir):
         shard_id, shard = args
+
+        # calculate the output filename and check if it exists
+        tokenized_filename, file_exists = self.check_file(bin_dir, shard)
+        if file_exists:
+            print(f"Already saved {tokenized_filename}, skipping..")
+            return
+
+        # Actually create tokens
         with open(shard, "r") as f:
             data = json.load(f)
         all_tokens = []
@@ -179,32 +245,17 @@ class TinyStoriesData(BaseDataset):
             text = text.strip()  # get rid of leading/trailing whitespace
             tokens = self.enc.encode(text, bos=True, eos=False)  # encode the text, use BOS
             all_tokens.extend(tokens)
+
         # convert to uint16 nparray
         all_tokens = np.array(all_tokens, dtype=np.uint16)
-        # calculate the output filename
-        if vocab_size == 0:
-            # if we're using Llama 2, just save the tokenized file in the same dir
-            tokenized_filename = shard.replace(".json", ".bin")
-        else:
-            # save .bin files into a new tok{N} directory
-            bin_dir = self.work_dir / f"tok{vocab_size}"
-            shard_basename = os.path.basename(shard)
-            bin_basename = shard_basename.replace(".json", ".bin")
-            tokenized_filename = os.path.join(bin_dir, bin_basename)
+
         # write the bytes
         with open(tokenized_filename, "wb") as f:
             f.write(all_tokens.tobytes())
+
         # calculate the average sequence length (they are separated by BOS=1)
         avg_seq_len = all_tokens.size / ((all_tokens == 1).sum())
         print(f"Saved {tokenized_filename}, average seqlen: {avg_seq_len:.2f}")
-
-    def get_tokenizer_model_path(self, vocab_size):
-        """
-        Returns path to the sentencepiece tokenizer model for a given vocab size
-        vocab_size = 0 designates the default Llama 2 tokenizer, in that case
-        None is returned.
-        """
-        return None if vocab_size == 0 else str(self.work_dir / f"tok{vocab_size}.model")
 
 
 class Task:

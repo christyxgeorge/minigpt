@@ -2,23 +2,32 @@
 
 import pandas as pd
 import tiktoken
-from minigpt.loaders.loader_base import BaseDataset
+from minigpt.loaders.text_dataset import TextDataset
 
 
-class SpotifyMillionSongsData(BaseDataset):
+class SpotifyMillionSongsData(TextDataset):
+    def __init__(self, src, work_dir, verbose=False):
+        super().__init__(src, work_dir, "spotify_millsongdata.csv", verbose=verbose)
+
     @property
     def name(self) -> str:
         """Return the dataset name"""
         return "Spotify Million Songs"
 
+    def is_prepared(self) -> bool:
+        """Check if the data(bin_files) have been prepared"""
+        bin_files_exist = (self.work_dir / self.train_bin).exists() and (
+            self.work_dir / self.val_bin
+        ).exists()
+        return bin_files_exist
+
     def download(self, force=False):
         # download the spotify million songs dataset (git lfs link)
         data_url = "https://media.githubusercontent.com/media/christyxgeorge/datasets/main/spotify_millsongdata.csv"
-        self.download_url("spotify_millsongdata.csv", data_url)
+        self.download_file(data_url, self.filename)
 
     def download_kaggle(self):
         # download the spotify million songs dataset
-        file_name = "spotify_millsongdata.csv"
         dataset_name = "spotify-million-song-dataset"
         self.download_kaggle("notshrirang", dataset_name, file_name)
 

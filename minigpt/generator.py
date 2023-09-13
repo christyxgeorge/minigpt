@@ -4,7 +4,7 @@ import os
 
 import torch
 from minigpt.config import ModelConfig
-from minigpt.loaders.loader_base import BaseDataset
+from minigpt.loaders.base_dataset import BaseDataset
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +20,11 @@ class GPTGenerator:
         checkpoint = self.load_checkpoint(args.model_id, args.work_dir)
         self.cfg = checkpoint["config"]
         state_dict = checkpoint["model"]
+        iterations = checkpoint["iter_num"]
+        best_val_loss = checkpoint["best_val_loss"]
+        print(
+            f"Checkpoint restored. Trained for {iterations} iterations, Loss = {best_loss_value}"
+        )
         unwanted_prefix = "_orig_mod."
         for k, _v in list(state_dict.items()):
             if k.startswith(unwanted_prefix):

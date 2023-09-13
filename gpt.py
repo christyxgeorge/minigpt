@@ -7,7 +7,7 @@ from typing import Literal
 
 from dotenv import dotenv_values, load_dotenv
 from minigpt.generator import GPTGenerator
-from minigpt.loaders.loader_base import BaseDataset
+from minigpt.loaders.base_dataset import BaseDataset
 from minigpt.trainer import GPTTrainer
 
 # log_format = '%(asctime)s.%(msecs)03d %(message)s'
