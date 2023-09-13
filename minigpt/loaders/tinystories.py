@@ -37,15 +37,15 @@ class TinyStoriesData(BaseDataset):
         # download the TinyStories dataset, unless it's already downloaded
         data_url = "https://huggingface.co/datasets/roneneldan/TinyStories/resolve/main/TinyStories_all_data.tar.gz"
         data_filename = self.work_dir / "TinyStories_all_data.tar.gz"
-        if not data_filename.exists():
-            print(f"Downloading {data_url} to {data_filename}...")
-            self.download_file(data_url, data_filename)
-        else:
-            print(f"{data_filename} already exists, skipping download...")
 
         # unpack the tar.gz file into all the data shards (json files)
         data_dir = self.work_dir / "TinyStories_all_data"
         if not data_dir.exists():
+            if not data_filename.exists():
+                print(f"Downloading {data_url} to {data_filename}...")
+                self.download_file(data_url, data_filename)
+            else:
+                print(f"{data_filename} already exists, skipping download...")
             data_dir.mkdir(parents=True, exist_ok=True)
             print(f"Unpacking {data_filename}...")
             os.system(f"tar -xzf {data_filename} -C {data_dir}")  # nosec
@@ -67,6 +67,7 @@ class TinyStoriesData(BaseDataset):
         self.download(force=force)  # Download the file, if not available
         self.train_vocab(self.vocab_size)
         tokenizer_model = self.get_tokenizer_model_path(self.vocab_size)
+        print(f"Tokenizer Model = {tokenizer_model} / {type(tokenizer_model)}")
         self.enc = Tokenizer(tokenizer_model)
         self.pretokenize()
         return False
