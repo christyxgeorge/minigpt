@@ -25,14 +25,14 @@ from minigpt.models.bigram import BigramLanguageModel
 
 MODELS = {
     "b": BigramLanguageModel,
-    "1": GPTLanguageModelv1,
-    "2": GPTLanguageModelv2,
-    "3": GPTLanguageModelv3,
-    "4": GPTLanguageModelv4,
-    "5": GPTLanguageModelv5,
-    "6": GPTLanguageModelv6,
-    "7": GPTLanguageModelv7,
-    "l": GPTLanguageModelLlama2,
+    "m1": GPTLanguageModelv1,
+    "m2": GPTLanguageModelv2,
+    "m3": GPTLanguageModelv3,
+    "m4": GPTLanguageModelv4,
+    "m5": GPTLanguageModelv5,
+    "m6": GPTLanguageModelv6,
+    "m7": GPTLanguageModelv7,
+    "l2": GPTLanguageModelLlama2,
 }
 
 # Note: P100 does not support Mixed Precision...
@@ -133,15 +133,14 @@ class ModelConfig:
             if self.gradient_accumulation_steps != initial_grad_accum_steps:  # Has changed
                 logger.info(
                     f"world size = {self.world_size}, "
-                    f"gradient_accumulation_steps changed from {initial_grad_accum_steps} to {self.gradient_accumulation_steps}, "
-                    f"tokens per iteration [per process] will be: {tokens_per_iter:,}",
+                    f"gradient_accumulation_steps changed from {initial_grad_accum_steps} to {self.gradient_accumulation_steps} * {self.world_size}, "
                 )
             else:
                 logger.info(
                     f"world size = {self.world_size}, "
                     f"gradient_accumulation_steps = {self.gradient_accumulation_steps}, "
-                    f"tokens per iteration [per process] will be: {tokens_per_iter:,}",
                 )
+                logger.info(f"tokens per iteration [per process] will be: {tokens_per_iter:,}")
 
     @property
     def is_wandb_enabled(self) -> bool:

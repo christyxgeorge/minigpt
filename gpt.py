@@ -15,6 +15,10 @@ from minigpt.trainer import GPTTrainer
 log_format = "{asctime}.{msecs:3.0f} {levelname} [{name}]: {message}"
 log_style: Literal["%", "{", "$"] = "{"
 logging.basicConfig(format=log_format, level=logging.DEBUG, datefmt="%I:%M:%S", style=log_style)
+
+# Reduce log level for distributed -- Maybe set TORCH_DISTRIBUTED_DEBUG?
+logging.getLogger("torch.distributed").setLevel(logging.WARNING)
+logging.getLogger("torch.nn.parallel.distributed").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 

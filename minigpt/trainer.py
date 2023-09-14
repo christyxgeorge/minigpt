@@ -238,45 +238,70 @@ class GPTTrainer:
                 f"training starts [DDP: False, Scaler Enabled = {self.scaler.is_enabled()}]"
             )
 
+    def load_checkpoint(self):
+        checkpoint_dir = self.work_dir / "checkpoints"
+        ckpt_path = checkpoint_dir / f"{ self.model.name}.ckpt.pt"
+        checkpoint = torch.load(ckpt_path, map_location=self.cfg.device)
+        return checkpoint
+
+    def restore_model_state(self, checkpoint):
+        self.cfg = checkpoint["config"]
+        state_dict = checkpoint["model"]
+        iterations = checkpoint["iter_num"]
+        best_val_loss = checkpoint["best_val_loss"]
+        print(
+            f"Checkpoint restored. Trained for {iterations} iterations, Loss = {best_val_loss:.4f}"
+        )
+        unwanted_prefix = "_orig_mod."
+        for k, _v in list(state_dict.items()):
+            if k.startswith(unwanted_prefix):
+                state_dict[k[len(unwanted_prefix) :]] = state_dict.pop(k)
+
+        # Restore optimizer state
+        optimizer.load_state_dict(checkpoint["optimizer"])
+
     def train_model(self, use_ddp=False):
         """Train the model"""
         self.wandb_init()
-        train_start_time = time.time()
 
         # optional: track gradients
         # wandb.watch(self.model)
 
-        # if init_from == "resume":
-        #     optimizer.load_state_dict(checkpoint["optimizer"])
-        # checkpoint = None  # free up memory
-
-        if self.master_process:
-            self.print_training_info()
-            self.print_estimate_loss(0)  # Print Initial Losses!
+        if self.cfg.resume:  # If we are resuming!
+            checkpoint = self.load_checkpoint()
+            checkpoint = None  # free up memory
 
         if self.cfg.device_type == "cuda":
             torch.backends.cuda.matmul.allow_tf32 = True  # allow tf32 on matmul
             torch.backends.cudnn.allow_tf32 = True  # allow tf32 on cudnn
 
+        if self.master_process:
+            self.print_training_info()
+
+        train_start_time = time.time()
         if use_ddp:
-            self.setup_ddp()
             optimizer = self.model.configure_optimizers(master_process=self.master_process)
+            self.setup_ddp()
             self.pre_training_ddp()
+            self.print_estimate_loss(0)  # Print Initial Losses!
             step = self.training_loop_ddp(optimizer)
-            # Post training... Logging etc..
-            # In case of DDP, use the unwrapped DDP model to checkpoint
-            self.post_training(self.model.module, optimizer, train_start_time, step)
             self.cleanup_ddp()
+            # In case of DDP, use the unwrapped DDP model to checkpoint
+            raw_model = self.model.module
         else:
             # use AdamW instead of torch.optim.SGD
             optimizer = torch.optim.AdamW(self.model.parameters(), lr=self.cfg.learning_rate)
+            self.print_estimate_loss(0)  # Print Initial Losses!
             step = self.training_loop_single(optimizer)
-            # Post training... Logging etc..
-            self.post_training(self.model, optimizer, train_start_time, step)
+            raw_model = self.model
 
-        self.wandb_finish()
+        train_time = time.time() - train_start_time
         if self.master_process:
+            losses = self.print_estimate_loss(step + 1)
+            self.log_training(losses, train_time, step)
+            self.save_model(step + 1, raw_model, optimizer, losses["val"])
             logger.info("training ends")
+        self.wandb_finish()
 
     def pre_training_ddp(self):
         # TODO: Check how to do this?
@@ -357,23 +382,16 @@ class GPTTrainer:
                 break
         return step
 
-    def post_training(self, model, optimizer, train_start_time, step):
+    def log_training(self, losses, train_time, step):
         """Logging Summary etc!"""
-        train_time = time.time() - train_start_time
-
-        # Logging Summary etc
-        if self.master_process:
-            losses = self.print_estimate_loss(step + 1)
-            print("=" * 100)
-            if train_time < 60:
-                logger.info(f"Time taken = {train_time:.3f} secs")
-            else:
-                mins = int(train_time // 60)
-                secs = train_time % 60
-                logger.info(f"Time taken = {train_time:.3f} secs - {mins} mins, {secs:.3f} secs")
-            print(f"Losses: {losses}")
-
-            self.save_model(step + 1, model, optimizer, losses["val"])
+        print("=" * 100)
+        if train_time < 60:
+            logger.info(f"Time taken = {train_time:.3f} secs")
+        else:
+            mins = int(train_time // 60)
+            secs = train_time % 60
+            logger.info(f"Time taken = {train_time:.3f} secs - {mins} mins, {secs:.3f} secs")
+        print(f"Losses: {losses}")
 
     # def train_single_epoch(self, optimizer):
     #     xb, yb = self.get_batch("train")  ## xb = B x T
