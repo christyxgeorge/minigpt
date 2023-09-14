@@ -12,6 +12,7 @@ import semver
 import torch
 import torch.nn as nn
 from minigpt.models import (
+    GPTLanguageModelLlama2,
     GPTLanguageModelv1,
     GPTLanguageModelv2,
     GPTLanguageModelv3,
@@ -23,13 +24,15 @@ from minigpt.models import (
 from minigpt.models.bigram import BigramLanguageModel
 
 MODELS = {
-    1: GPTLanguageModelv1,
-    2: GPTLanguageModelv2,
-    3: GPTLanguageModelv3,
-    4: GPTLanguageModelv4,
-    5: GPTLanguageModelv5,
-    6: GPTLanguageModelv6,
-    7: GPTLanguageModelv7,
+    "b": BigramLanguageModel,
+    "1": GPTLanguageModelv1,
+    "2": GPTLanguageModelv2,
+    "3": GPTLanguageModelv3,
+    "4": GPTLanguageModelv4,
+    "5": GPTLanguageModelv5,
+    "6": GPTLanguageModelv6,
+    "7": GPTLanguageModelv7,
+    "l": GPTLanguageModelLlama2,
 }
 
 # Note: P100 does not support Mixed Precision...
@@ -47,7 +50,7 @@ class ModelConfig:
     source: str
     verbose: bool = False
 
-    model_id: int = 0  ## Model Version to use
+    model_id: str = "b"  ## Model Version to use
     batch_size: int = 4  ## Number of independent sequences processed in parallel
     block_size: int = 8  ## Context Length for the prediction
     n_embed: int = 32  ## Dimension of the embedding
@@ -76,6 +79,7 @@ class ModelConfig:
 
     use_ddp: bool = False
     local_rank: int = 0
+    world_size: int = 0
     ddp_device: str = "gloo"  ## "xla" for TPU, "nccl" for CUDA, "gloo" for CPU
     device_type: str = "cpu"
     device = None
@@ -85,8 +89,8 @@ class ModelConfig:
     eval_only: bool = False  # if True, script exits right after the first eval
 
     wandb: str = "off"  # "on", "overwrite", "off"
-
     vocab_source: str = "llama2"  # used while tokenizing `tiny stories` dataset
+    resume: bool = False  # If we want to resume the previous training
 
     def __post_init__(self):
         # Setup Device and Evaluation Parameters
@@ -101,16 +105,46 @@ class ModelConfig:
 
         ver = semver.Version.parse(torch.__version__)
         self.compile = True if self.compile and ver.major >= 2 else False
-        self.device = torch.device(self.device_type + f":{self.local_rank}")
+        if self.device_type == "cpu":
+            self.device = torch.device(self.device_type)
+        else:
+            self.device = torch.device(self.device_type + f":{self.local_rank}")
         if self.device_type == "cpu":
             n_cores = psutil.cpu_count(logical=False)
             os.environ["OMP_NUM_THREADS"] = f"{n_cores}"
             # torch.set_num_interop_threads()  # Inter-op parallelism
             # torch.set_num_threads()  # Intra-op parallelism
-        # logger.info(f"config = {self.dict()}, local_rank = {self.local_rank}")
+
+        # Setup cuda device
+        if self.device_type == "cuda":
+            device = f"{self.device_type}:{self.local_rank}"
+            torch.cuda.set_device(device)
+            logger.info(f"[{self.local_rank}] Setting CUDA device to {device}")
+
+        # world_size number of processes will be training simultaneously, so we can scale
+        # down the desired gradient accumulation iterations per process proportionally
+        initial_grad_accum_steps = self.gradient_accumulation_steps
+        # assert self.gradient_accumulation_steps % self.world_size == 0  # nosec
+        self.gradient_accumulation_steps //= self.world_size
+        tokens_per_iter = (
+            self.gradient_accumulation_steps * self.world_size * self.batch_size * self.block_size
+        )
+        if self.local_rank == 0:  # Master process
+            if self.gradient_accumulation_steps != initial_grad_accum_steps:  # Has changed
+                logger.info(
+                    f"world size = {self.world_size}, "
+                    f"gradient_accumulation_steps changed from {initial_grad_accum_steps} to {self.gradient_accumulation_steps}, "
+                    f"tokens per iteration [per process] will be: {tokens_per_iter:,}",
+                )
+            else:
+                logger.info(
+                    f"world size = {self.world_size}, "
+                    f"gradient_accumulation_steps = {self.gradient_accumulation_steps}, "
+                    f"tokens per iteration [per process] will be: {tokens_per_iter:,}",
+                )
 
     @property
-    def wandb_log(self) -> bool:
+    def is_wandb_enabled(self) -> bool:
         return self.wandb != "off"
 
     @property

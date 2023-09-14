@@ -23,12 +23,13 @@ class MultiHeadAttentionParallel(nn.Module):
         self.proj = nn.Linear(cfg.n_embed, cfg.n_embed)
 
         # Local Variables
-        self.flash = False  # hasattr(torch.nn.functional, "scaled_dot_product_attention")
+        self.flash = hasattr(torch.nn.functional, "scaled_dot_product_attention")
         self.head_size = cfg.n_embed // cfg.n_heads
         self.num_heads = cfg.n_heads
         self.cfg = cfg
 
         if not self.flash:
+            print("WARNING: using slow attention. Flash Attention requires PyTorch >= 2.0")
             self.register_buffer(
                 "tril",
                 torch.tril(torch.ones(cfg.block_size, cfg.block_size)).view(
@@ -50,8 +51,11 @@ class MultiHeadAttentionParallel(nn.Module):
         _, T, C = x.shape
         k = self.split_heads(self.key(x))  # B x num_heads x T x head_size (hs)
         q = self.split_heads(self.query(x))  # B x num_heads x T x head_size (hs)
+        v = self.split_heads(self.value(x))  # B x num_heads x T x head_size (hs)
 
+        # causal self-attention; Self-attend: (B, nh, T, hs) x (B, nh, hs, T) -> (B, nh, T, T)
         if self.flash:
+            # efficient attention using Flash Attention CUDA kernels
             out = torch.nn.functional.scaled_dot_product_attention(
                 q,
                 k,
@@ -61,12 +65,12 @@ class MultiHeadAttentionParallel(nn.Module):
                 is_causal=True,
             )
         else:
+            # manual implementation of attention
             att = q @ k.transpose(-2, -1) * C**-0.5  # Scaled attention
             att = att.masked_fill(self.tril[:, :, :T, :T] == 0, float("-inf"))
             att = F.softmax(att, dim=-1)
             att = self.att_dropout(att)
-            v = self.split_heads(self.value(x))  # B x num_heads x T x head_size (hs)
-            out = att @ v
+            out = att @ v  # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
         out = self.combine_heads(out)
         return self.residual_dropout(self.proj(out))
 

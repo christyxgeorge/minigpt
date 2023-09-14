@@ -31,24 +31,30 @@ def train_fn(rank, args, wsize):
     if args.verbose:
         print(f"Train function called for rank {rank} / {wsize}")
     trainer = GPTTrainer(args, local_rank=rank, world_size=wsize)
-    trainer.train_ddp()
+    trainer.train_model(use_ddp=True)
 
 
 class GPTTrainer:
     def __init__(self, args, **kwargs):
         """Data Loading and Hyperparameters"""
-        self.local_rank = kwargs.get("local_rank", 0)
-        self.world_size = kwargs.get("world_size", 1)
         # the master process will do logging, checkpointing etc.
-        self.master_process = self.local_rank == 0
+        local_rank = kwargs.get("local_rank", 0)
+        world_size = kwargs.get("world_size", 1)
+        self.master_process = local_rank == 0
 
         self.verbose = args.verbose
         self.tdata = BaseDataset.get_loader(args, load=True)
         self.cfg = ModelConfig(
-            **vars(args), vocab_size=self.tdata.vocab_size, local_rank=self.local_rank
+            **vars(args),
+            vocab_size=self.tdata.vocab_size,
+            local_rank=local_rank,
+            world_size=world_size,
         )
         self.model = self.cfg.get_model()
         self.ctx, self.scaler = self.setup_ctx_and_scaler()
+
+        # setup manual seed
+        torch.manual_seed(TORCH_MANUAL_SEED + local_rank)
 
         if self.master_process:
             self.print_device_info()
@@ -70,7 +76,7 @@ class GPTTrainer:
         else:
             logger.info("Training without DDP")
             trainer = GPTTrainer(args)
-            trainer.train_single()
+            trainer.train_model(use_ddp=False)
 
     def setup_ctx_and_scaler(self):
         # 'float32', 'bfloat16', or 'float16', the latter will auto implement a GradScaler
@@ -151,9 +157,7 @@ class GPTTrainer:
             xlosses["eval_time"] = eval_time
             xlosses["est_time"] = estimation_time
         kwargs["lr"] = kwargs.get("lr", self.cfg.learning_rate)
-        xlosses.update(kwargs)
-        if self.cfg.wandb_log and self.master_process:
-            wandb.log(xlosses, step=iter)
+        self.wandb_log(iter, **xlosses, **kwargs)
         return xlosses
 
     def get_batch(self, split) -> tuple[torch.Tensor, torch.Tensor]:
@@ -177,20 +181,25 @@ class GPTTrainer:
         return self.cfg.min_lr + coeff * (self.cfg.learning_rate - self.cfg.min_lr)
 
     def save_model(self, iter, model, optimizer, val_loss):
-        checkpoint = {
-            "model": self.model.state_dict(),
-            "optimizer": optimizer.state_dict(),
-            "iter_num": iter,
-            "best_val_loss": val_loss,
-            "config": self.cfg,
-        }
-        checkpoint_dir = self.cfg.work_dir / "checkpoints"
-        logger.info(f"Saving model checkpoint @ step {iter} to {checkpoint_dir}")
-        checkpoint_dir.mkdir(parents=True, exist_ok=True)  # Create, if not exists.
-        torch.save(checkpoint, checkpoint_dir / f"{self.model.name}.ckpt.pt")
+        """
+        Save the model. In case of DDP, we use the unwrapped model (model.module)
+        Also, we dont save the model, unless at least 100 iterations have run
+        """
+        if iter > 100:
+            checkpoint = {
+                "model": model.state_dict(),
+                "optimizer": optimizer.state_dict(),
+                "iter_num": iter,
+                "best_val_loss": val_loss,
+                "config": self.cfg,
+            }
+            checkpoint_dir = self.cfg.work_dir / "checkpoints"
+            logger.info(f"Saving model checkpoint @ step {iter} to {checkpoint_dir}")
+            checkpoint_dir.mkdir(parents=True, exist_ok=True)  # Create, if not exists.
+            torch.save(checkpoint, checkpoint_dir / f"{model.name}.ckpt.pt")
 
     def wandb_init(self):
-        if self.cfg.wandb_log and self.master_process:
+        if self.cfg.is_wandb_enabled and self.master_process:
             wandb_api_key = os.environ["WANDB_API_KEY"]
             wandb.login(key=wandb_api_key)
             wandb.init(
@@ -204,8 +213,12 @@ class GPTTrainer:
                 tags=[self.cfg.model_name],
             )
 
+    def wandb_log(self, step, **kwargs):
+        if self.cfg.is_wandb_enabled and self.master_process:
+            wandb.log(kwargs, step=step)
+
     def wandb_finish(self):
-        if self.cfg.wandb_log and self.master_process:
+        if self.cfg.is_wandb_enabled and self.master_process:
             wandb.finish()
 
     def print_training_info(self):
@@ -218,28 +231,79 @@ class GPTTrainer:
         print("=" * 100)
         if self.cfg.use_ddp:
             logger.info(
-                f"training starts [DDP: {self.world_size} devices,  Scaler Enabled = {self.scaler.is_enabled()}]"
+                f"training starts [DDP: {self.cfg.world_size} devices,  Scaler Enabled = {self.scaler.is_enabled()}]"
             )
         else:
             logger.info(
                 f"training starts [DDP: False, Scaler Enabled = {self.scaler.is_enabled()}]"
             )
 
-    def train_single(self):
-        # setup manual seed
+    def train_model(self, use_ddp=False):
+        """Train the model"""
         self.wandb_init()
-        torch.manual_seed(TORCH_MANUAL_SEED)
-
-        # use AdamW instead of torch.optim.SGD
-        optimizer = torch.optim.AdamW(self.model.parameters(), lr=self.cfg.learning_rate)
-
-        self.print_training_info()
-        self.print_estimate_loss(0)  # Print Initial Losses!
+        train_start_time = time.time()
 
         # optional: track gradients
         # wandb.watch(self.model)
 
-        start_time = time.time()
+        # if init_from == "resume":
+        #     optimizer.load_state_dict(checkpoint["optimizer"])
+        # checkpoint = None  # free up memory
+
+        if self.master_process:
+            self.print_training_info()
+            self.print_estimate_loss(0)  # Print Initial Losses!
+
+        if self.cfg.device_type == "cuda":
+            torch.backends.cuda.matmul.allow_tf32 = True  # allow tf32 on matmul
+            torch.backends.cudnn.allow_tf32 = True  # allow tf32 on cudnn
+
+        if use_ddp:
+            self.setup_ddp()
+            optimizer = self.model.configure_optimizers(master_process=self.master_process)
+            self.pre_training_ddp()
+            step = self.training_loop_ddp(optimizer)
+            # Post training... Logging etc..
+            # In case of DDP, use the unwrapped DDP model to checkpoint
+            self.post_training(self.model.module, optimizer, train_start_time, step)
+            self.cleanup_ddp()
+        else:
+            # use AdamW instead of torch.optim.SGD
+            optimizer = torch.optim.AdamW(self.model.parameters(), lr=self.cfg.learning_rate)
+            step = self.training_loop_single(optimizer)
+            # Post training... Logging etc..
+            self.post_training(self.model, optimizer, train_start_time, step)
+
+        self.wandb_finish()
+        if self.master_process:
+            logger.info("training ends")
+
+    def pre_training_ddp(self):
+        # TODO: Check how to do this?
+        # crop down the model block size if desired, using model surgery
+        # if block_size < model.config.block_size:
+        #     model.crop_block_size(block_size)
+        #     model_args['block_size'] = block_size # so that the checkpoint will have the right value
+        #     model.to(device)
+
+        # compile the model
+        if self.cfg.compile:
+            compile_start = time.time()
+            logger.info("compiling the model... (takes a ~minute)")
+            import torch._dynamo
+
+            torch._dynamo.config.verbose = self.verbose
+            self.model = torch.compile(self.model)  # requires PyTorch 2.0
+            logger.info(f"compiled the model... (took {time.time() - compile_start} secs)")
+
+        # wrap model into DDP container
+        self.model = (
+            DDP(self.model, device_ids=[self.cfg.local_rank])
+            if self.cfg.device_type == "cuda"
+            else DDP(self.model)
+        )
+
+    def training_loop_single(self, optimizer):
         eval_start_time = time.time()
         for step in range(self.cfg.max_iters):  ## `n` steps
             if step and step % self.cfg.eval_interval == 0:
@@ -248,91 +312,11 @@ class GPTTrainer:
             self.train_epoch(self.model, optimizer)
             if self.cfg.eval_only:
                 break
+        return step
 
-        losses = self.print_estimate_loss(step + 1)
-
-        elapsed_time = time.time() - start_time
-        print("=" * 100)
-        if elapsed_time < 60:
-            logger.info(f"Time taken = {elapsed_time:.3f} secs")
-        else:
-            mins = int(elapsed_time // 60)
-            secs = elapsed_time % 60
-            print(f"Time taken = {elapsed_time:.3f} secs - {mins} mins, {secs:.3f} secs")
-        print(f"Losses: {losses}")
-
-        self.save_model(step + 1, self.model, optimizer, losses["val"])
-        self.wandb_finish()
-        logger.info("training ends")
-
-    def train_ddp(self):
+    def training_loop_ddp(self, optimizer):
         """Run Loop with DDP - Single node"""
-        self.wandb_init()
-        self.setup_ddp()
-        if self.cfg.device_type == "cuda":
-            device = f"cuda:{self.local_rank}"
-            torch.cuda.set_device(device)
-            logger.info(f"[{self.local_rank}] Setting CUDA device to {device}")
-        seed_offset = self.local_rank  # each process gets a different seed
-
-        # world_size number of processes will be training simultaneously, so we can scale
-        # down the desired gradient accumulation iterations per process proportionally
-        gradient_accumulation_steps = self.cfg.gradient_accumulation_steps
-        # assert gradient_accumulation_steps % ddp_world_size == 0  # nosec
-        gradient_accumulation_steps //= self.world_size
-        tokens_per_iter = (
-            gradient_accumulation_steps
-            * self.world_size
-            * self.cfg.batch_size
-            * self.cfg.block_size
-        )
-        if self.master_process:
-            logger.info(
-                f"tokens per iteration will be: {tokens_per_iter:,}, gradient_accumulation_steps = {gradient_accumulation_steps}"
-            )
-        # setup manual seed
-        torch.manual_seed(TORCH_MANUAL_SEED + seed_offset)
-
-        if self.cfg.device_type == "cuda":
-            torch.backends.cuda.matmul.allow_tf32 = True  # allow tf32 on matmul
-            torch.backends.cudnn.allow_tf32 = True  # allow tf32 on cudnn
-
-        # crop down the model block size if desired, using model surgery
-        # if block_size < model.config.block_size:
-        #     model.crop_block_size(block_size)
-        #     model_args['block_size'] = block_size # so that the checkpoint will have the right value
-        #     model.to(device)
-
-        optimizer = self.model.configure_optimizers(master_process=self.master_process)
-        # if init_from == "resume":
-        #     optimizer.load_state_dict(checkpoint["optimizer"])
-        # checkpoint = None  # free up memory
-
-        # compile the model
-        if self.cfg.compile:
-            print("compiling the model... (takes a ~minute)")
-            model = torch.compile(self.model)  # requires PyTorch 2.0
-        else:
-            model = self.model
-
-        # wrap model into DDP container
-        model = (
-            DDP(model, device_ids=[self.local_rank])
-            if self.cfg.device_type == "cuda"
-            else DDP(model)
-        )
-        raw_model = model.module  # unwrap DDP container if needed
         running_mflops = -1
-
-        if self.master_process:
-            self.print_training_info()
-            self.print_estimate_loss(0)  # Print Initial Losses!
-
-        # optional: track gradients
-        # wandb.watch(self.model)
-
-        # Training Loop
-        train_start_time = time.time()
         eval_start_time = time.time()
         for step in range(self.cfg.max_iters):  ## `n` steps
             # determine and set the learning rate for this iteration
@@ -345,9 +329,7 @@ class GPTTrainer:
                 eval_start_time = time.time()
 
             t0 = time.time()
-            loss = self.train_gradient_accum(
-                model, optimizer, self.cfg.gradient_accumulation_steps
-            )
+            loss = self.train_gradient_accum(optimizer)
             dt = time.time() - t0
 
             if step and step % self.cfg.eval_interval == 0 and self.master_process:
@@ -355,18 +337,17 @@ class GPTTrainer:
                 # scale up to undo the division above, approximating the true total loss (exact would have been a sum)
                 # let the training loop settle a bit [step > 0]
                 lossf = loss.item() * self.cfg.gradient_accumulation_steps
-                mflops_achieved = raw_model.mflops_achieved(
-                    self.cfg.batch_size * gradient_accumulation_steps, dt
+                mflops_achieved = self.model.module.mflops_achieved(
+                    self.cfg.batch_size * self.cfg.gradient_accumulation_steps, dt
                 )
                 running_mflops = (
                     mflops_achieved
                     if running_mflops == -1
                     else 0.9 * running_mflops + 0.1 * mflops_achieved
                 )
-                if self.cfg.wandb_log and self.master_process:
-                    wandb.log(
-                        {"mflops_achieved": mflops_achieved, "running_mflops": running_mflops},
-                        step=step,
+                if self.cfg.is_wandb_enabled and self.master_process:
+                    self.wandb_log(
+                        step, mflops_achieved=mflops_achieved, running_mflops=running_mflops
                     )
 
                 print(
@@ -374,7 +355,10 @@ class GPTTrainer:
                 )
             if self.cfg.eval_only:
                 break
+        return step
 
+    def post_training(self, model, optimizer, train_start_time, step):
+        """Logging Summary etc!"""
         train_time = time.time() - train_start_time
 
         # Logging Summary etc
@@ -389,12 +373,7 @@ class GPTTrainer:
                 logger.info(f"Time taken = {train_time:.3f} secs - {mins} mins, {secs:.3f} secs")
             print(f"Losses: {losses}")
 
-            self.save_model(step + 1, raw_model, optimizer, losses["val"])
-
-        self.wandb_finish()
-        self.cleanup_ddp()
-        if self.master_process:
-            logger.info("training ends")
+            self.save_model(step + 1, model, optimizer, losses["val"])
 
     # def train_single_epoch(self, optimizer):
     #     xb, yb = self.get_batch("train")  ## xb = B x T
@@ -439,7 +418,8 @@ class GPTTrainer:
         gc.collect()
         torch.cuda.empty_cache()
 
-    def train_gradient_accum(self, model, optimizer, accum_steps) -> None:
+    def train_gradient_accum(self, optimizer) -> None:
+        accum_steps = self.cfg.gradient_accumulation_steps
         # forward backward update, with optional gradient accumulation to simulate larger batch size
         # and using the GradScaler if data type is float16
         for micro_step in range(accum_steps):
@@ -449,9 +429,9 @@ class GPTTrainer:
                 # the official way to do this is with model.no_sync() context manager, but
                 # I really dislike that this bloats the code and forces us to repeat code
                 # looking at the source of that context manager, it just toggles this variable
-                model.require_backward_grad_sync = micro_step == accum_steps - 1
+                self.model.require_backward_grad_sync = micro_step == accum_steps - 1
             with self.ctx:
-                logits, loss = model(xb, yb)
+                logits, loss = self.model(xb, yb)
                 # scale the loss to account for gradient accumulation
                 loss = loss / accum_steps
 
@@ -463,7 +443,7 @@ class GPTTrainer:
         # clip the gradient
         if self.cfg.grad_clip != 0.0:
             self.scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(model.parameters(), self.cfg.grad_clip)
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.cfg.grad_clip)
         # step the optimizer and scaler if training in fp16
         self.scaler.step(optimizer)
         self.scaler.update()
@@ -487,8 +467,8 @@ class GPTTrainer:
         backend = self.cfg.ddp_device
         dist.init_process_group(
             backend=backend,
-            rank=self.local_rank,
-            world_size=self.world_size,
+            rank=self.cfg.local_rank,
+            world_size=self.cfg.world_size,
             init_method=init_method,
         )
 

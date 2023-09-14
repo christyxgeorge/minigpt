@@ -31,7 +31,7 @@ class TextDataset(BaseDataset):
     val_bin: str = "val.bin"
 
     def __init__(self, src, work_dir, filename, verbose=False):
-        self.filename = self.work_dir / filename
+        self.filename = work_dir / filename
 
         # Setup internal variables before calling super().__init__()
         super().__init__(src, work_dir, verbose=verbose)
@@ -109,10 +109,9 @@ class TextDataset(BaseDataset):
 
         # Create data tensor!
         if self.verbose:
-            print(f"    Text Length = {len(self.text)}")
             print(f"    Vocab Size = {self.vocab_size} => [{','.join(self.vocab_chars)}]")
             print(
-                f"    Training len = {len(self.train_data)}, Validation len = {self.len(self.val_data)}"
+                f"    Training len = {len(self.train_data)}, Validation len = {len(self.val_data)}"
             )
             print("=" * 100)
 

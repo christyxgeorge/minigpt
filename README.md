@@ -18,11 +18,11 @@ Pending things and issues encountered
   - Number of cores, memory??
 - Track gradients on WANDB (wandb.watch)
 - wandb.watch to see if model parameters and model architecture can be seen
-- Check Pytorch 2.0 compile!
+- Check Pytorch 2.0 compile! - Fails on mac with omp.h issue!
 - Need to check this. using fused AdamW (model_base.py / configure_optimizers)
 - Verbose is not used properly all across
 - DDP logs after mp.spawn is missing on kaggle!
-- Sample Generation can also be moved to DDP, if possible?
+- Sample Generation can also be moved to DDP, if possible? (llama2.py)
 - Tinystories processing.
 - Async prefetch of get_batch, local_iter_num??
 - profile?
