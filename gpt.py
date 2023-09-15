@@ -8,6 +8,7 @@ from typing import Literal
 from dotenv import dotenv_values, load_dotenv
 from minigpt.generator import GPTGenerator
 from minigpt.loaders.base_dataset import BaseDataset
+from minigpt.models.base_model import BaseLanguageModel
 from minigpt.trainer import GPTTrainer
 
 # log_format = '%(asctime)s.%(msecs)03d %(message)s'
@@ -29,11 +30,17 @@ def get_args():
     )
 
     common_parser = argparse.ArgumentParser(add_help=False)
-    common_parser.add_argument("-m", "--model_id", type=str, default="b")
+    common_parser.add_argument(
+        "-m",
+        "--model_id",
+        choices=BaseLanguageModel.models(),
+        default=BaseLanguageModel.default_model(),
+    )
     common_parser.add_argument(
         "-s", "--source", choices=BaseDataset.loaders(), default=BaseDataset.default_loader()
     )
-    common_parser.add_argument("-d", "--work-dir", dest="work_dir")
+    common_parser.add_argument("-d", "--work-dir")
+    common_parser.add_argument("-p", "--ddp-port", default=argparse.SUPPRESS)
     common_parser.add_argument("-v", "--verbose", action="store_true", default=False)
     common_parser.add_argument(
         "--vocab-source",
@@ -55,24 +62,25 @@ def get_args():
     train_parser = subparsers.add_parser("train", parents=[common_parser])
     train_parser.add_argument("--batch", dest="batch_size", type=int, default=4)
     train_parser.add_argument("--block", dest="block_size", type=int, default=8)
-    train_parser.add_argument("--embedding", dest="n_embed", type=int, default=32)
+    train_parser.add_argument("--embed-dim", dest="n_embed", type=int, default=32)
     train_parser.add_argument("--layers", dest="n_layers", type=int, default=4)
     train_parser.add_argument("--heads", dest="n_heads", type=int, default=4)
-    train_parser.add_argument("--max-iters", dest="max_iters", type=int, default=3000)
+    train_parser.add_argument("--max-iters", type=int, default=3000)
     train_parser.add_argument("--learning-rate", type=float, default=1e-3)
     train_parser.add_argument("--dropout", type=float, default=0.2)
 
-    train_parser.add_argument("--wandb", dest="wandb", default="off")
+    train_parser.add_argument("--wandb", action="store_true", default="off")
     train_parser.add_argument("--no-ddp", dest="use_ddp", action="store_false", default=True)
-    train_parser.add_argument("--eval-only", dest="eval_only", action="store_true", default=False)
+    train_parser.add_argument("--eval-only", action="store_true", default=False)
     train_parser.add_argument("--compile", action="store_true", default=False)
-    train_parser.add_argument("--decay-lr", dest="decay_lr", action="store_true", default=False)
+    train_parser.add_argument("--decay-lr", action="store_true", default=False)
     train_parser.add_argument("--resume", action="store_true", default=False)
+    train_parser.add_argument("--pretrained-model", default=None)
 
     # Sub-parser for getting options to  generate
     gen_parser = subparsers.add_parser("generate", parents=[common_parser])
     gen_parser.add_argument("--tokens", type=int, default=1000)
-    gen_parser.add_argument("--start-with", dest="start_with", default=None)
+    gen_parser.add_argument("--start-with", default=None)
     gen_parser.add_argument("-t", "--temperature", type=int, default=0.7)
 
     args = parser.parse_args()
@@ -85,6 +93,10 @@ def get_args():
             f"Error: Invalid multiple of heads [{args.n_heads}] to embedding dimensions [{args.n_embed}]"
         )
         exit(-1)
+    if args.model_id == "pt" and not args.pretrained_model:
+        print(f"Error: Pretrained model name not specified")
+        exit(-2)
+
     return command, args
 
 

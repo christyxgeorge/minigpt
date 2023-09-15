@@ -3,11 +3,11 @@
 import torch
 import torch.nn as nn
 
+from .base_model import BaseLanguageModel
 from .blocks import AttentionHead
-from .model_base import LanguageModelBase
 
 
-class GPTLanguageModelv1(LanguageModelBase):
+class GPTLanguageModelv1(BaseLanguageModel):
     def __init__(self, cfg):
         super().__init__(cfg)
         # Each token gets the logits for the next token from the lookup table

@@ -27,6 +27,7 @@ Pending things and issues encountered
 - profile?
 - where was it run???
 - gpu_model to compute mfu properly (t4, p100, v100, a100, h100, tpu v2, v3...)
+- model cropping (why do we need this, crop_block_size function in nanogpt/trainer.py)
 
 Need to check/understand the following
 

@@ -40,8 +40,8 @@ class BaseDataset(ABC):
         self.metadata_file = self.work_dir / "metadata.pkl"
         self.verbose = verbose
         self.prepared = self.is_prepared()
-        prep_text = "is" if self.prepared else "is not"
-        logger.info(f"Text Dataset {src} [{self.__class__.__name__}] {prep_text} prepared")
+        # prep_text = "is" if self.prepared else "is not"
+        # logger.info(f"Text Dataset {src} [{self.__class__.__name__}] {prep_text} prepared")
 
     @staticmethod
     def default_loader():
@@ -49,7 +49,7 @@ class BaseDataset(ABC):
 
     @staticmethod
     def loaders():
-        return LOADERS.keys()
+        return list(LOADERS.keys())
 
     @property
     @abstractmethod

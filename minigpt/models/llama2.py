@@ -8,8 +8,8 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
+from .base_model import BaseLanguageModel
 from .blocks import FeedForwardDropout
-from .model_base import LanguageModelBase
 
 
 @dataclass
@@ -178,7 +178,7 @@ class ResidualTransformerBlockLlama2(nn.Module):
         return x
 
 
-class GPTLanguageModelLlama2(LanguageModelBase):
+class GPTLanguageModelLlama2(BaseLanguageModel):
     def __init__(self, cfg):
         super().__init__(cfg)
         # Each token gets the logits for the next token from the lookup table

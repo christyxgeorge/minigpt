@@ -1,4 +1,5 @@
 """The Language Model Classes"""
+import importlib
 import inspect
 import logging
 from typing import TYPE_CHECKING
@@ -13,13 +14,35 @@ from torch.nn import functional as F
 
 logger = logging.getLogger(__name__)
 
+MODELS = {
+    "bg": "BigramLanguageModel",
+    "m1": "GPTLanguageModelv1",
+    "m2": "GPTLanguageModelv2",
+    "m3": "GPTLanguageModelv3",
+    "m4": "GPTLanguageModelv4",
+    "m5": "GPTLanguageModelv5",
+    "m6": "GPTLanguageModelv6",
+    "m7": "GPTLanguageModelv7",
+    "l2": "GPTLanguageModelLlama2",
+    "pt": "PretrainedModel",  ## For loading pre-trained GPT2 etc.
+}
+DEFAULT_MODEL = "bg"
 
-class LanguageModelBase(nn.Module):
+
+class BaseLanguageModel(nn.Module):
     """Base Model"""
 
     def __init__(self, cfg: "ModelConfig"):
         super().__init__()
         self.cfg = cfg
+
+    @staticmethod
+    def default_model():
+        return DEFAULT_MODEL
+
+    @staticmethod
+    def models():
+        return list(MODELS.keys())
 
     @property
     def name(self) -> str:
@@ -28,6 +51,10 @@ class LanguageModelBase(nn.Module):
     @property
     def device(self):
         return next(self.parameters()).device
+
+    @staticmethod
+    def model_name(model_id) -> str:
+        return MODELS.get(model_id, "BigramLanguageModel")
 
     def get_num_params(self, non_embedding=True):
         """
@@ -94,6 +121,17 @@ class LanguageModelBase(nn.Module):
         # mfu = flops_achieved / flops_promised
         return flops_achieved / 1e6
 
+    def crop_block_size(self, block_size):
+        # model surgery to decrease the block size if necessary
+        # e.g. we may load the GPT2 pretrained model checkpoint (block size 1024)
+        # but want to use a smaller block size for some smaller, simpler model
+        assert block_size <= self.cfg.block_size  # nosec
+        self.config.block_size = block_size
+        self.transformer.wpe.weight = nn.Parameter(self.transformer.wpe.weight[:block_size])
+        for block in self.transformer.h:
+            if hasattr(block.attn, "bias"):
+                block.attn.bias = block.attn.bias[:, :, :block_size, :block_size]
+
     def compute_loss(
         self, logits: torch.Tensor, targets: torch.Tensor | None = None
     ) -> torch.Tensor | None:
@@ -152,3 +190,17 @@ class LanguageModelBase(nn.Module):
             # Append sampled index to the running sequence and continue
             idx = torch.cat((idx, idx_next), dim=1)  ## --> B x T+1
         return idx
+
+    @staticmethod
+    def get_model(cfg) -> nn.Module:
+        current_package = importlib.import_module(__package__)
+        cls_name = MODELS.get(cfg.model_id)
+        if cls_name:
+            model_cls = getattr(current_package, cls_name)
+            model_params = {"cfg": cfg}
+            m = model_cls(**model_params)
+            return m.to(cfg.device)
+        else:
+            error_msg = f"Unknown Model ID: {cfg.model_id} - Use one of {MODELS.keys()}"
+            logger.warn(error_msg)
+            raise ValueError(error_msg)

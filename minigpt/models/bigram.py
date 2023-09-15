@@ -2,10 +2,10 @@
 
 import torch.nn as nn
 
-from .model_base import LanguageModelBase
+from .base_model import BaseLanguageModel
 
 
-class BigramLanguageModel(LanguageModelBase):
+class BigramLanguageModel(BaseLanguageModel):
     """Basic Bigram Language Model, Uses only the last token to predict the next one"""
 
     def __init__(self, cfg):

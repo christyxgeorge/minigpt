@@ -14,6 +14,7 @@ import torch.multiprocessing as mp
 import wandb
 from minigpt.config import ModelConfig
 from minigpt.loaders.base_dataset import BaseDataset
+from minigpt.models.base_model import BaseLanguageModel
 from torch.nn.parallel import DistributedDataParallel as DDP
 
 logger = logging.getLogger(__name__)
@@ -41,8 +42,12 @@ class GPTTrainer:
         local_rank = kwargs.get("local_rank", 0)
         world_size = kwargs.get("world_size", 1)
         self.master_process = local_rank == 0
+        self.resume = args.resume
 
-        self.verbose = args.verbose
+        # setup manual seed
+        torch.manual_seed(TORCH_MANUAL_SEED + local_rank)
+        torch.cuda.manual_seed(TORCH_MANUAL_SEED + local_rank)
+
         self.tdata = BaseDataset.get_loader(args, load=True)
         self.cfg = ModelConfig(
             **vars(args),
@@ -50,13 +55,10 @@ class GPTTrainer:
             local_rank=local_rank,
             world_size=world_size,
         )
-        self.model = self.cfg.get_model()
+        self.model = BaseLanguageModel.get_model(self.cfg)
         self.ctx, self.scaler = self.setup_ctx_and_scaler()
 
-        # setup manual seed
-        torch.manual_seed(TORCH_MANUAL_SEED + local_rank)
-
-        if self.master_process:
+        if self.master_process and self.cfg.verbose:
             self.print_device_info()
 
     @staticmethod
@@ -191,14 +193,15 @@ class GPTTrainer:
                 "optimizer": optimizer.state_dict(),
                 "iter_num": iter,
                 "best_val_loss": val_loss,
-                "config": self.cfg,
+                "hparams": self.cfg.hparams,
+                "vocab_size": self.cfg.vocab_size,
             }
             checkpoint_dir = self.cfg.work_dir / "checkpoints"
             logger.info(f"Saving model checkpoint @ step {iter} to {checkpoint_dir}")
             checkpoint_dir.mkdir(parents=True, exist_ok=True)  # Create, if not exists.
-            torch.save(checkpoint, checkpoint_dir / f"{model.name}.ckpt.pt")
+            torch.save(checkpoint, checkpoint_dir / f"{model.name.lower()}.ckpt.pt")
 
-    def wandb_init(self):
+    def wandb_init(self, first_step=0):
         if self.cfg.is_wandb_enabled and self.master_process:
             wandb_api_key = os.environ["WANDB_API_KEY"]
             wandb.login(key=wandb_api_key)
@@ -207,10 +210,10 @@ class GPTTrainer:
                 project="minigpt",
                 id=self.cfg.run_id,
                 notes=json.dumps(self.cfg.dict()),
-                # starting_step=0,
-                # resumed=False,
+                starting_step=first_step,
+                resumed=self.resume,
                 config=self.cfg.dict(),  # track hyperparameters and run metadata
-                tags=[self.cfg.model_name],
+                tags=[self.model.name],
             )
 
     def wandb_log(self, step, **kwargs):
@@ -229,47 +232,61 @@ class GPTTrainer:
         )
         print(f"Model Config: {self.cfg.dict()}")
         print("=" * 100)
-        if self.cfg.use_ddp:
-            logger.info(
-                f"training starts [DDP: {self.cfg.world_size} devices,  Scaler Enabled = {self.scaler.is_enabled()}]"
-            )
-        else:
-            logger.info(
-                f"training starts [DDP: False, Scaler Enabled = {self.scaler.is_enabled()}]"
-            )
+        ddp_str = f"{self.cfg.world_size} devices" if self.cfg.use_ddp else "False"
+        logger.info(
+            f"Training starts [Device = {self.cfg.device_type}, DDP: {ddp_str}, Scaler Enabled = {self.scaler.is_enabled()}]"
+        )
 
     def load_checkpoint(self):
-        checkpoint_dir = self.work_dir / "checkpoints"
-        ckpt_path = checkpoint_dir / f"{ self.model.name}.ckpt.pt"
+        checkpoint_dir = self.cfg.work_dir / "checkpoints"
+        ckpt_path = checkpoint_dir / f"{self.model.name.lower()}.ckpt.pt"
+        # TODO: Check if checkpoint does not exist!
         checkpoint = torch.load(ckpt_path, map_location=self.cfg.device)
         return checkpoint
 
-    def restore_model_state(self, checkpoint):
-        self.cfg = checkpoint["config"]
+    def restore_model_state(self, checkpoint, optimizer):
+        self.cfg.update_hparams(**checkpoint["hparams"])
         state_dict = checkpoint["model"]
         iterations = checkpoint["iter_num"]
+        if iterations >= self.cfg.max_iters:
+            error_msg = f"Number of iterations completed {iterations} >= Maximum iterations {self.cfg.max_iters}"
+            logger.warn(error_msg)
+            raise ValueError(error_msg)
         best_val_loss = checkpoint["best_val_loss"]
         print(
             f"Checkpoint restored. Trained for {iterations} iterations, Loss = {best_val_loss:.4f}"
         )
+
+        # fix the keys of the state dictionary :(
+        # honestly no idea how checkpoints sometimes get this prefix, have to debug more
         unwanted_prefix = "_orig_mod."
         for k, _v in list(state_dict.items()):
             if k.startswith(unwanted_prefix):
                 state_dict[k[len(unwanted_prefix) :]] = state_dict.pop(k)
 
-        # Restore optimizer state
+        # Restore model and optimizer state
+        self.model.load_state_dict(state_dict)
         optimizer.load_state_dict(checkpoint["optimizer"])
+        return iterations
 
     def train_model(self, use_ddp=False):
         """Train the model"""
         self.wandb_init()
 
+        if use_ddp:
+            optimizer = self.model.configure_optimizers(master_process=self.master_process)
+        else:
+            # use AdamW instead of torch.optim.SGD
+            optimizer = torch.optim.AdamW(self.model.parameters(), lr=self.cfg.learning_rate)
+
         # optional: track gradients
         # wandb.watch(self.model)
 
-        if self.cfg.resume:  # If we are resuming!
+        first_step = 0
+        if self.resume:
             checkpoint = self.load_checkpoint()
-            checkpoint = None  # free up memory
+            first_step = self.restore_model_state(checkpoint, optimizer)
+            checkpoint = None  # free memory as soon as we can
 
         if self.cfg.device_type == "cuda":
             torch.backends.cuda.matmul.allow_tf32 = True  # allow tf32 on matmul
@@ -280,44 +297,36 @@ class GPTTrainer:
 
         train_start_time = time.time()
         if use_ddp:
-            optimizer = self.model.configure_optimizers(master_process=self.master_process)
             self.setup_ddp()
             self.pre_training_ddp()
-            self.print_estimate_loss(0)  # Print Initial Losses!
-            step = self.training_loop_ddp(optimizer)
+            self.print_estimate_loss(first_step)  # Print Initial Losses!
+            step, last_eval_stime = self.training_loop_ddp(optimizer, first_step=first_step)
             self.cleanup_ddp()
             # In case of DDP, use the unwrapped DDP model to checkpoint
             raw_model = self.model.module
         else:
-            # use AdamW instead of torch.optim.SGD
-            optimizer = torch.optim.AdamW(self.model.parameters(), lr=self.cfg.learning_rate)
-            self.print_estimate_loss(0)  # Print Initial Losses!
-            step = self.training_loop_single(optimizer)
+            self.print_estimate_loss(first_step)  # Print Initial Losses!
+            step, last_eval_stime = self.training_loop_single(optimizer, first_step=first_step)
             raw_model = self.model
 
         train_time = time.time() - train_start_time
         if self.master_process:
-            losses = self.print_estimate_loss(step + 1)
-            self.log_training(losses, train_time, step)
+            losses = self.print_estimate_loss(step + 1, eval_start_time=last_eval_stime)
             self.save_model(step + 1, raw_model, optimizer, losses["val"])
-            logger.info("training ends")
+            self.log_training(losses, train_time, step)
+            print(
+                f"{':'*20} Training Ended: Losses = Val: {losses['val']:.4f}, Train: {losses['train']:.4f} {':'*20}"
+            )
         self.wandb_finish()
 
     def pre_training_ddp(self):
-        # TODO: Check how to do this?
-        # crop down the model block size if desired, using model surgery
-        # if block_size < model.config.block_size:
-        #     model.crop_block_size(block_size)
-        #     model_args['block_size'] = block_size # so that the checkpoint will have the right value
-        #     model.to(device)
-
         # compile the model
         if self.cfg.compile:
             compile_start = time.time()
             logger.info("compiling the model... (takes a ~minute)")
             import torch._dynamo
 
-            torch._dynamo.config.verbose = self.verbose
+            # torch._dynamo.config.verbose = self.cfg.verbose
             self.model = torch.compile(self.model)  # requires PyTorch 2.0
             logger.info(f"compiled the model... (took {time.time() - compile_start} secs)")
 
@@ -328,28 +337,28 @@ class GPTTrainer:
             else DDP(self.model)
         )
 
-    def training_loop_single(self, optimizer):
+    def training_loop_single(self, optimizer, first_step=0):
         eval_start_time = time.time()
-        for step in range(self.cfg.max_iters):  ## `n` steps
-            if step and step % self.cfg.eval_interval == 0:
+        for step in range(first_step, self.cfg.max_iters):  ## `n` steps
+            if step > first_step and step % self.cfg.eval_interval == 0:
                 self.print_estimate_loss(step, eval_start_time=eval_start_time)
                 eval_start_time = time.time()
             self.train_epoch(self.model, optimizer)
             if self.cfg.eval_only:
                 break
-        return step
+        return step, eval_start_time
 
-    def training_loop_ddp(self, optimizer):
+    def training_loop_ddp(self, optimizer, first_step=0):
         """Run Loop with DDP - Single node"""
         running_mflops = -1
         eval_start_time = time.time()
-        for step in range(self.cfg.max_iters):  ## `n` steps
+        for step in range(first_step, self.cfg.max_iters):  ## `n` steps
             # determine and set the learning rate for this iteration
-            lr = get_lr(step) if self.cfg.decay_lr else self.cfg.learning_rate
+            lr = self.get_lr(step) if self.cfg.decay_lr else self.cfg.learning_rate
             for param_group in optimizer.param_groups:
                 param_group["lr"] = lr
 
-            if step and step % self.cfg.eval_interval == 0:
+            if step > first_step and step % self.cfg.eval_interval == 0:
                 self.print_estimate_loss(step, eval_start_time=eval_start_time, lr=lr)
                 eval_start_time = time.time()
 
@@ -357,7 +366,7 @@ class GPTTrainer:
             loss = self.train_gradient_accum(optimizer)
             dt = time.time() - t0
 
-            if step and step % self.cfg.eval_interval == 0 and self.master_process:
+            if step > first_step and step % self.cfg.eval_interval == 0 and self.master_process:
                 # get loss as float. note: this is a CPU-GPU sync point
                 # scale up to undo the division above, approximating the true total loss (exact would have been a sum)
                 # let the training loop settle a bit [step > 0]
@@ -380,7 +389,7 @@ class GPTTrainer:
                 )
             if self.cfg.eval_only:
                 break
-        return step
+        return step, eval_start_time
 
     def log_training(self, losses, train_time, step):
         """Logging Summary etc!"""
@@ -391,7 +400,6 @@ class GPTTrainer:
             mins = int(train_time // 60)
             secs = train_time % 60
             logger.info(f"Time taken = {train_time:.3f} secs - {mins} mins, {secs:.3f} secs")
-        print(f"Losses: {losses}")
 
     # def train_single_epoch(self, optimizer):
     #     xb, yb = self.get_batch("train")  ## xb = B x T
@@ -477,9 +485,9 @@ class GPTTrainer:
         # Setup MASTER_ADDR/MASTER_PORT for default init_method env://
         init_method = "env://"
         os.environ["MASTER_ADDR"] = "localhost"
-        os.environ["MASTER_PORT"] = "12355"
+        os.environ["MASTER_PORT"] = str(self.cfg.ddp_port)
 
-        # init_method = "tcp://localhost:12355"
+        # init_method = f"tcp://localhost:{self.cfg.ddp_port}"
 
         # initialize the process group
         backend = self.cfg.ddp_device

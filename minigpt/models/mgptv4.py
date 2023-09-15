@@ -6,8 +6,8 @@ To fix this, we need to add residual connections
 import torch
 import torch.nn as nn
 
+from .base_model import BaseLanguageModel
 from .blocks import FeedForward, MultiHeadAttention
-from .model_base import LanguageModelBase
 
 
 class TransformerBlock(nn.Module):
@@ -24,7 +24,7 @@ class TransformerBlock(nn.Module):
         return x
 
 
-class GPTLanguageModelv4(LanguageModelBase):
+class GPTLanguageModelv4(BaseLanguageModel):
     def __init__(self, cfg):
         super().__init__(cfg)
         # Each token gets the logits for the next token from the lookup table

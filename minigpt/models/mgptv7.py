@@ -5,8 +5,8 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
+from .base_model import BaseLanguageModel
 from .blocks import FeedForwardDropout
-from .model_base import LanguageModelBase
 
 
 class MultiHeadAttentionParallel(nn.Module):
@@ -97,7 +97,7 @@ class ResidualTransformerBlockParallel(nn.Module):
         return x
 
 
-class GPTLanguageModelv7(LanguageModelBase):
+class GPTLanguageModelv7(BaseLanguageModel):
     def __init__(self, cfg):
         super().__init__(cfg)
         # Each token gets the logits for the next token from the lookup table
