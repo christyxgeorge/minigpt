@@ -210,9 +210,7 @@ class GPTTrainer:
                 project="minigpt",
                 id=self.cfg.run_id,
                 notes=json.dumps(self.cfg.dict()),
-                starting_step=first_step,
-                resumed=self.resume,
-                config=self.cfg.dict(),  # track hyperparameters and run metadata
+                config=dict(**self.cfg.dict(), starting_step=first_step, resumed=self.resume),
                 tags=[self.model.name],
             )
 
