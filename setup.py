@@ -17,7 +17,7 @@ setup(
         "Requests==2.31.0",
         "sentencepiece==0.1.99",
         "tiktoken==0.4.0",
-        "torch>2",
+        # "torch>2", ## Dont install torch by default...
         "tqdm>=4.66",  # 4.66.1",
         "wandb",  # ==0.15.10",
         "python-dotenv",  # ==1.0.0",
