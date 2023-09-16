@@ -9,6 +9,7 @@ from dotenv import dotenv_values, load_dotenv
 from minigpt.generator import GPTGenerator
 from minigpt.loaders.base_dataset import BaseDataset
 from minigpt.models.base_model import BaseLanguageModel
+from minigpt.models.gpt_pretrained import PRETRAINED_MODELS
 from minigpt.trainer import GPTTrainer
 
 # log_format = '%(asctime)s.%(msecs)03d %(message)s'
@@ -75,7 +76,7 @@ def get_args():
     train_parser.add_argument("--compile", action="store_true", default=False)
     train_parser.add_argument("--decay-lr", action="store_true", default=False)
     train_parser.add_argument("--resume", action="store_true", default=False)
-    train_parser.add_argument("--pretrained-model", default=None)
+    train_parser.add_argument("--pretrained-model", default=None, choices=PRETRAINED_MODELS)
 
     # Sub-parser for getting options to  generate
     gen_parser = subparsers.add_parser("generate", parents=[common_parser])
@@ -93,7 +94,7 @@ def get_args():
             f"Error: Invalid multiple of heads [{args.n_heads}] to embedding dimensions [{args.n_embed}]"
         )
         exit(-1)
-    if args.model_id == "pt" and not args.pretrained_model:
+    if args.model_id == "g2" and not args.pretrained_model:
         print(f"Error: Pretrained model name not specified")
         exit(-2)
 

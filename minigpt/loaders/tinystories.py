@@ -5,6 +5,7 @@ import json
 import os
 import random
 import tarfile
+import time
 from concurrent.futures import ProcessPoolExecutor
 from functools import partial
 from pathlib import Path
@@ -27,15 +28,15 @@ class TinyStoriesData(BaseDataset):
     def __init__(self, src, work_dir, verbose=False):
         self.iter_batches = {"train": None, "val": None}
         self.iter_val_batches = None
-        self.vocab_source = "llama2"  # llama2|custom;
+        self.vocab_source = src  # llama2|custom;
         if self.vocab_source == "llama2":
             # .bin files will be saved into llama2 directory, create it once here
             self.bin_dir = work_dir / f"llama2"
             self.vocab_size = 32000  # the Llama 2 tokenizer has 32K tokens
         else:
             # .bin files will be saved into tok{N} directory, create it once here
-            self.bin_dir = work_dir / f"tok{vocab_size}"
             self.vocab_size = 2048
+            self.bin_dir = work_dir / f"tok{self.vocab_size}"
         os.makedirs(self.bin_dir, exist_ok=True)
 
         # Setup internal variables before calling super().__init__()
@@ -87,7 +88,7 @@ class TinyStoriesData(BaseDataset):
             data = json.load(f)
         print(f"Number of shards: {len(shard_filenames)}\nExample story:\n{data[0]}")
         elapsed_time = time.time() - start_time
-        print("Download Done, Time taken = {elapsed_time:.3f} secs")
+        print(f"Download Done, Time taken = {elapsed_time:.3f} secs")
 
     def prepare(self, force=False):
         """Create train.bin and val.bin files"""
@@ -300,7 +301,7 @@ class PretokDataset(torch.utils.data.IterableDataset):
         shard_filenames = sorted(glob.glob(os.path.join(self.bin_dir, "*.bin")))
         # train/test split. let's use only shard 0 for test split, rest train
         shard_filenames = shard_filenames[1:] if self.split == "train" else shard_filenames[:1]
-        assert len(shard_filenames) > 0, f"No bin files found in {bin_dir}"  # nosec
+        assert len(shard_filenames) > 0, f"No bin files found in {self.bin_dir}"  # nosec
         while True:
             rng.shuffle(shard_filenames)
             for shard in shard_filenames:

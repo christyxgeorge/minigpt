@@ -15,6 +15,7 @@ import wandb
 from minigpt.config import ModelConfig
 from minigpt.loaders.base_dataset import BaseDataset
 from minigpt.models.base_model import BaseLanguageModel
+from minigpt.models.gpt_pretrained import GPT2PretainedModel
 from torch.nn.parallel import DistributedDataParallel as DDP
 
 logger = logging.getLogger(__name__)
@@ -47,6 +48,8 @@ class GPTTrainer:
         # setup manual seed
         torch.manual_seed(TORCH_MANUAL_SEED + local_rank)
         torch.cuda.manual_seed(TORCH_MANUAL_SEED + local_rank)
+        torch.backends.cuda.matmul.allow_tf32 = True  # allow tf32 on matmul
+        torch.backends.cudnn.allow_tf32 = True  # allow tf32 on cudnn
 
         self.tdata = BaseDataset.get_loader(args, load=True)
         self.cfg = ModelConfig(
@@ -286,10 +289,6 @@ class GPTTrainer:
             first_step = self.restore_model_state(checkpoint, optimizer)
             checkpoint = None  # free memory as soon as we can
 
-        if self.cfg.device_type == "cuda":
-            torch.backends.cuda.matmul.allow_tf32 = True  # allow tf32 on matmul
-            torch.backends.cudnn.allow_tf32 = True  # allow tf32 on cudnn
-
         if self.master_process:
             self.print_training_info()
 
@@ -419,7 +418,7 @@ class GPTTrainer:
         # Delete the input batch tensors immediately
         del xb, yb
 
-        if self.scaler.is_enabled():
+        if self.scaler.is_enabled():  # This is not needed, as it is a no-op!
             ## Scale Gradients
             self.scaler.scale(loss).backward()
 

@@ -24,7 +24,7 @@ MODELS = {
     "m6": "GPTLanguageModelv6",
     "m7": "GPTLanguageModelv7",
     "l2": "GPTLanguageModelLlama2",
-    "pt": "PretrainedModel",  ## For loading pre-trained GPT2 etc.
+    "g2": "GPT2PretainedModel",  ## For loading pre-trained GPT2 etc.
 }
 DEFAULT_MODEL = "bg"
 
@@ -154,7 +154,7 @@ class BaseLanguageModel(nn.Module):
         ## Create the initial 'text' to generate the continuation --> Using 0 = \n or ` start_with`
         if start_with:
             tokens = self.tdata.encode(idx)
-            idx = torch.tensor(tokens, dtype=torch.long, device=device)
+            idx = torch.tensor(tokens, dtype=torch.long, device=self.cfg.device)
         else:
             idx = torch.zeros((1, 1), dtype=torch.long, device=self.cfg.device)
         tokens = self.generate(idx, num_tokens=num_tokens)
@@ -197,10 +197,13 @@ class BaseLanguageModel(nn.Module):
         cls_name = MODELS.get(cfg.model_id)
         if cls_name:
             model_cls = getattr(current_package, cls_name)
-            model_params = {"cfg": cfg}
-            m = model_cls(**model_params)
-            return m.to(cfg.device)
+            if cfg.model_id == "g2":
+                m = model_cls.from_pretrained(cfg)
+            else:
+                model_params = {"cfg": cfg}
+                m = model_cls(**model_params)
         else:
             error_msg = f"Unknown Model ID: {cfg.model_id} - Use one of {MODELS.keys()}"
             logger.warn(error_msg)
             raise ValueError(error_msg)
+        return m.to(cfg.device)

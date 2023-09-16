@@ -18,9 +18,9 @@ class AttentionHeadDropout(nn.Module):
 
     def __init__(self, cfg, head_size):
         super().__init__()
-        self.key = nn.Linear(cfg.n_embed, head_size, bias=False)
-        self.query = nn.Linear(cfg.n_embed, head_size, bias=False)
-        self.value = nn.Linear(cfg.n_embed, head_size, bias=False)
+        self.key = nn.Linear(cfg.n_embed, head_size, bias=cfg.bias)
+        self.query = nn.Linear(cfg.n_embed, head_size, bias=cfg.bias)
+        self.value = nn.Linear(cfg.n_embed, head_size, bias=cfg.bias)
         self.register_buffer(
             "tril", torch.tril(torch.ones(cfg.block_size, cfg.block_size))
         )  ## T x T
@@ -86,16 +86,8 @@ class ResidualTransformerBlockDropout(nn.Module):
 class GPTLanguageModelv6(BaseLanguageModel):
     def __init__(self, cfg):
         super().__init__(cfg)
-        # Each token gets the logits for the next token from the lookup table
         self.token_embedding_table = nn.Embedding(cfg.vocab_size, cfg.n_embed)
         self.position_embedding_table = nn.Embedding(cfg.block_size, cfg.n_embed)
-        # self.blocks = nn.Sequential(
-        #     ResidualTransformerBlockDropout(cfg),
-        #     ResidualTransformerBlockDropout(cfg),
-        #     ResidualTransformerBlockDropout(cfg),
-        #     ResidualTransformerBlockDropout(cfg),
-        #     nn.LayerNorm(n_embed),
-        # )
         self.blocks = nn.Sequential(
             *[ResidualTransformerBlockDropout(cfg) for _ in range(cfg.n_layers)]
         )
@@ -106,9 +98,8 @@ class GPTLanguageModelv6(BaseLanguageModel):
         # idx, targets --> B x T (batch_size x block_size)
         B, T = idx.shape
         token_embedding = self.token_embedding_table(idx)  # B x T x C (n_embed)
-        position_embedding = self.position_embedding_table(
-            torch.arange(T, device=self.cfg.device)
-        )  # (T x C)
+        pos = torch.arange(T, device=self.cfg.device)
+        position_embedding = self.position_embedding_table(pos)  # (T x C)
         x = (
             token_embedding + position_embedding
         )  ## B x T x C (position_embedding gets broadcasted for each batch)

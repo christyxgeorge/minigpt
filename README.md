@@ -10,9 +10,6 @@ Adapted from NanoGPT [https://github.com/karpathy/nanoGPT]
 #========================================================================================
 Pending things and issues encountered
 
-- Learning Decay
-- Resume learning (with local_iter_num), checkpointing (best_loss_val)
-- Load from GPT2 weights
 - crop down the model block size (why?)
 - Support for TPU/XLA --> torch_xla.multiprocessing as xmp, bfloat16 supported.
   - Number of cores, memory??
@@ -22,9 +19,9 @@ Pending things and issues encountered
 - Verbose is not used properly all across
 - DDP logs after mp.spawn is missing on kaggle!
 - Sample Generation can also be moved to DDP, if possible? (llama2.py)
-- Tinystories processing.
-- Async prefetch of get_batch, local_iter_num??
-- profile?
+- Async prefetch of get_batch - Is it needed?
+- cfg.profile?
+- TinyStories => HF Dataset has separate train/val files in .txt format. and only GPT4 data. Can we use it?
 - where was it run???
 - gpu_model to compute mfu properly (t4, p100, v100, a100, h100, tpu v2, v3...)
 - model cropping (why do we need this, crop_block_size function in nanogpt/trainer.py)

@@ -53,8 +53,8 @@ class ModelConfig:
     n_embed: int = 32  ## Dimension of the embedding
     n_layers: int = 4
     n_heads: int = 4
-    dropout: float = 0.2
-    bias: bool = False  # TODO: Check where it is used!
+    dropout: float = 0.2  # for pretraining 0 is good, for finetuning try 0.1+
+    bias: bool = False
 
     # settings for learning rate decay, gradient accumulation and max iterations
     learning_rate: float = 1e-3
@@ -126,6 +126,7 @@ class ModelConfig:
         # down the desired gradient accumulation iterations per process proportionally
         initial_grad_accum_steps = self.gradient_accumulation_steps
         # assert self.gradient_accumulation_steps % self.world_size == 0  # nosec
+        ## can also do math.ceil(accum_steps / world_size) instead of int div.
         self.gradient_accumulation_steps //= self.world_size
         tokens_per_iter = (
             self.gradient_accumulation_steps * self.world_size * self.batch_size * self.block_size
@@ -195,7 +196,7 @@ class ModelConfig:
             if hasattr(self, key):
                 curr_value = getattr(self, key)
                 if master_process and curr_value != value:
-                    logger.info("Hyperparameter {key} Changed from {curr_value} to {value}")
+                    logger.info(f"Hyperparameter {key} Changed from {curr_value} to {value}")
                 setattr(self, key, value)
 
     @staticmethod

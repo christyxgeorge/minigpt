@@ -9,9 +9,9 @@ class AttentionHead(nn.Module):
 
     def __init__(self, cfg, head_size):
         super().__init__()
-        self.key = nn.Linear(cfg.n_embed, head_size, bias=False)
-        self.query = nn.Linear(cfg.n_embed, head_size, bias=False)
-        self.value = nn.Linear(cfg.n_embed, head_size, bias=False)
+        self.key = nn.Linear(cfg.n_embed, head_size, bias=cfg.bias)
+        self.query = nn.Linear(cfg.n_embed, head_size, bias=cfg.bias)
+        self.value = nn.Linear(cfg.n_embed, head_size, bias=cfg.bias)
         self.register_buffer(
             "tril", torch.tril(torch.ones(cfg.block_size, cfg.block_size))
         )  ## T x T
@@ -41,24 +41,6 @@ class MultiHeadAttention(nn.Module):
     def forward(self, x):
         # Concatenate on the `channel` dimension
         return torch.cat([h(x) for h in self.heads], dim=-1)
-
-
-class MLP(nn.Module):
-    """MLP for use in GPT2 Architecture - which uses GELU"""
-
-    def __init__(self, cfg):
-        super().__init__()
-        self.c_fc = nn.Linear(cfg.n_embed, 4 * cfg.n_embed, bias=True)  # cfg.bias)
-        self.gelu = nn.GELU()
-        self.c_proj = nn.Linear(4 * cfg.n_embed, cfg.n_embed, bias=True)  # cfg.bias)
-        self.dropout = nn.Dropout(cfg.dropout)
-
-    def forward(self, x):
-        x = self.c_fc(x)
-        x = self.gelu(x)
-        x = self.c_proj(x)
-        x = self.dropout(x)
-        return x
 
 
 class FeedForward(nn.Module):
@@ -92,8 +74,32 @@ class FeedForwardDropout(nn.Module):
         return self.net(x)
 
 
+class LayerNorm(nn.Module):
+    """
+    LayerNorm but with an optional bias. PyTorch doesn't support simply bias=False
+    Needed in the GPT2 Architecture
+    """
+
+    def __init__(self, ndim, bias):
+        super().__init__()
+        self.weight = nn.Parameter(torch.ones(ndim))
+        self.bias = nn.Parameter(torch.zeros(ndim)) if bias else None
+
+    def forward(self, input):
+        return F.layer_norm(input, self.weight.shape, self.weight, self.bias, 1e-5)
+
+
+# ===========================================================================================
+# BatchNorm1D and LayerNorm1D for reference.
+# Just to see the differences and how they are computed!
+# ===========================================================================================
+
+
 class BatchNorm1D:
-    """Batch Norm - from the makemore series"""
+    """
+    Batch Norm - from the makemore series
+    For reference, Not used
+    """
 
     def __init__(self, dim, eps=1e-5, momentum=0.1):
         self.eps = eps
@@ -129,7 +135,11 @@ class BatchNorm1D:
 
 
 class LayerNorm1D:
-    """Layer Norm -- Adapted from the above BatchNorm1D"""
+    """
+    Layer Norm -- Adapted from the above BatchNorm1D
+    Can see the difference between LayerNorm1D and BatchNorm1D
+    For reference, Not used
+    """
 
     def __init__(self, dim, eps=1e-5):
         self.eps = eps
@@ -147,18 +157,3 @@ class LayerNorm1D:
 
     def parameters(self):
         return [self.gamma, self.beta]
-
-
-class LayerNorm(nn.Module):
-    """
-    LayerNorm but with an optional bias. PyTorch doesn't support simply bias=False
-    Needed in the GPT2 Architecture
-    """
-
-    def __init__(self, ndim, bias):
-        super().__init__()
-        self.weight = nn.Parameter(torch.ones(ndim))
-        self.bias = nn.Parameter(torch.zeros(ndim)) if bias else None
-
-    def forward(self, input):
-        return F.layer_norm(input, self.weight.shape, self.weight, self.bias, 1e-5)

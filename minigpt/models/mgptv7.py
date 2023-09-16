@@ -6,17 +6,17 @@ import torch.nn as nn
 from torch.nn import functional as F
 
 from .base_model import BaseLanguageModel
-from .blocks import FeedForwardDropout
+from .blocks import FeedForwardDropout, LayerNorm
 
 
-class MultiHeadAttentionParallel(nn.Module):
+class MultiHeadAttention(nn.Module):
     """Multiple Attention heads - with Dropout - In parallel (split/combine)"""
 
     def __init__(self, cfg):
         super().__init__()
-        self.key = nn.Linear(cfg.n_embed, cfg.n_embed, bias=False)
-        self.query = nn.Linear(cfg.n_embed, cfg.n_embed, bias=False)
-        self.value = nn.Linear(cfg.n_embed, cfg.n_embed, bias=False)
+        self.key = nn.Linear(cfg.n_embed, cfg.n_embed, bias=cfg.bias)
+        self.query = nn.Linear(cfg.n_embed, cfg.n_embed, bias=cfg.bias)
+        self.value = nn.Linear(cfg.n_embed, cfg.n_embed, bias=cfg.bias)
         self.att_dropout = nn.Dropout(cfg.dropout)
         self.residual_dropout = nn.Dropout(cfg.dropout)
 
@@ -75,19 +75,19 @@ class MultiHeadAttentionParallel(nn.Module):
         return self.residual_dropout(self.proj(out))
 
 
-class ResidualTransformerBlockParallel(nn.Module):
-    """Transformer Block: Communication followed by Computation - With Residual Connections"""
-
-    """The layer norm we apply is called pre-norm. Slighly different from the original paper"""
+class TransformerBlock(nn.Module):
+    """
+    Transformer Block: Communication followed by Computation - With Residual Connections
+    The layer norm we apply is called pre-norm. Slighly different from the original paper
+    """
 
     def __init__(self, cfg):
         super().__init__()
-        self.sa = MultiHeadAttentionParallel(cfg)
+        # We use the LayerNorm with the optional bias (GPT2 models dont use bias)
+        self.ln1 = LayerNorm(cfg.n_embed, cfg.bias)
+        self.sa = MultiHeadAttention(cfg)
+        self.ln2 = LayerNorm(cfg.n_embed, cfg.bias)
         self.ffwd = FeedForwardDropout(cfg)
-        # Although we implemented the layer norm below, we use the torch version of it!
-        # Normalize each token. (mean of the `n_embed` channels)
-        self.ln1 = nn.LayerNorm(cfg.n_embed)
-        self.ln2 = nn.LayerNorm(cfg.n_embed)
 
     def forward(self, x):
         # Apply the attention heads on the pre-norm'ed `x`
@@ -100,12 +100,9 @@ class ResidualTransformerBlockParallel(nn.Module):
 class GPTLanguageModelv7(BaseLanguageModel):
     def __init__(self, cfg):
         super().__init__(cfg)
-        # Each token gets the logits for the next token from the lookup table
         self.token_embedding_table = nn.Embedding(cfg.vocab_size, cfg.n_embed)
         self.position_embedding_table = nn.Embedding(cfg.block_size, cfg.n_embed)
-        self.blocks = nn.Sequential(
-            *[ResidualTransformerBlockParallel(cfg) for _ in range(cfg.n_layers)]
-        )
+        self.blocks = nn.Sequential(*[TransformerBlock(cfg) for _ in range(cfg.n_layers)])
         self.ln_f = nn.LayerNorm(cfg.n_embed)
         self.lm_head = nn.Linear(cfg.n_embed, cfg.vocab_size)
 

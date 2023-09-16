@@ -181,7 +181,6 @@ class ResidualTransformerBlockLlama2(nn.Module):
 class GPTLanguageModelLlama2(BaseLanguageModel):
     def __init__(self, cfg):
         super().__init__(cfg)
-        # Each token gets the logits for the next token from the lookup table
         self.token_embedding_table = nn.Embedding(cfg.vocab_size, cfg.n_embed)
         self.position_embedding_table = nn.Embedding(cfg.block_size, cfg.n_embed)
         self.blocks = nn.Sequential(

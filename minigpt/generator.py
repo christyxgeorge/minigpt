@@ -14,8 +14,14 @@ TORCH_MANUAL_SEED = 1337
 
 class GPTGenerator:
     def __init__(self, args):
+        """Initialize GPT Generator"""
+
+        # setup manual seed
         torch.manual_seed(TORCH_MANUAL_SEED)
         torch.cuda.manual_seed(TORCH_MANUAL_SEED)
+        torch.backends.cuda.matmul.allow_tf32 = True  # allow tf32 on matmul
+        torch.backends.cudnn.allow_tf32 = True  # allow tf32 on cudnn
+
         self.start_with = args.start_with
         self.num_tokens = args.tokens
         self.temperature = args.temperature
@@ -35,7 +41,6 @@ class GPTGenerator:
                 state_dict[k[len(unwanted_prefix) :]] = state_dict.pop(k)
 
         assert self.tdata.vocab_size == checkpoint["vocab_size"]  # nosec
-        args
         self.cfg = ModelConfig(
             **vars(args),
             vocab_size=self.tdata.vocab_size,
