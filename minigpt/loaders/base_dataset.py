@@ -35,13 +35,16 @@ class BaseDataset(ABC):
     val_data = None
     prepared: bool = False
 
-    def __init__(self, src, work_dir, verbose=False):
-        self.work_dir = work_dir
+    def __init__(self, args):
+        self.work_dir = args.work_dir
         self.metadata_file = self.work_dir / "metadata.pkl"
-        self.verbose = verbose
+        self.verbose = args.verbose
         self.prepared = self.is_prepared()
-        prep_text = "is" if self.prepared else "is not"
-        logger.info(f"Text Dataset {src} [{self.__class__.__name__}] {prep_text} prepared")
+        if self.verbose:
+            prep_text = "is" if self.prepared else "is not"
+            logger.info(
+                f"Text Dataset {args.source} [{self.__class__.__name__}] {prep_text} prepared"
+            )
 
     @staticmethod
     def default_loader():
@@ -98,7 +101,7 @@ class BaseDataset(ABC):
         cls_name = LOADERS.get(args.source)
         if cls_name:
             cls = getattr(current_package, cls_name)
-            loader = cls(args.source, args.work_dir, verbose=args.verbose)
+            loader = cls(args)
             if load:
                 loader.load_data()
             return loader

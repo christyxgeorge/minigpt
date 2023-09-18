@@ -6,8 +6,8 @@ from minigpt.loaders.text_dataset import TextDataset
 
 
 class SpotifyMillionSongsData(TextDataset):
-    def __init__(self, src, work_dir, verbose=False):
-        super().__init__(src, work_dir, "spotify_millsongdata.csv", verbose=verbose)
+    def __init__(self, args):
+        super().__init__(args, "spotify_millsongdata.csv")
 
     @property
     def name(self) -> str:

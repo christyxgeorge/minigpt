@@ -19,7 +19,7 @@ from minigpt.models.base_model import BaseLanguageModel
 from torch.nn.parallel import DistributedDataParallel as DDP
 
 logger = logging.getLogger(__name__)
-xlogger = logging.getLogger("trainlog")
+xlogger = logging.getLogger("trainlog")  # TODO: To merge logger and xlogger!
 
 TORCH_MANUAL_SEED = 1337
 
@@ -131,7 +131,7 @@ class GPTTrainer:
         print("=" * 100)
 
     @torch.no_grad()
-    def print_estimate_loss(self, iter, eval_start_time=None, xlogger=None, **kwargs):
+    def print_estimate_loss(self, iter, eval_start_time=None, **kwargs):
         xlosses = {}
         if not self.master_process:  # Nothing to do if not master process
             return xlosses
@@ -159,7 +159,7 @@ class GPTTrainer:
 
         log_msg = f"step {iter:4d}: train loss = {xlosses['train']:.4f}, val loss = {xlosses['val']:.4f}{elapsed_str}"
         logger.info(log_msg)
-        xlogger.info(log_msg) if xlogger else print(log_msg)
+        xlogger.info(log_msg)
 
         if eval_start_time:
             xlosses["eval_time"] = eval_time
@@ -204,8 +204,24 @@ class GPTTrainer:
             }
             checkpoint_dir = self.cfg.work_dir / "checkpoints"
             logger.info(f"Saving model checkpoint @ step {iter} to {checkpoint_dir}")
+            xlogger.info(f"Saving model checkpoint @ step {iter} to {checkpoint_dir}")
             checkpoint_dir.mkdir(parents=True, exist_ok=True)  # Create, if not exists.
             torch.save(checkpoint, checkpoint_dir / f"{model.name.lower()}.ckpt.pt")
+
+    def init_log_file(self):
+        """
+        Write to a log file. This can be used to check the progress on Kaggle/Colab
+        where the logger is not working with the spawned process
+        """
+        log_file = str(self.cfg.work_dir / "train.log")
+        if os.path.exists(log_file):
+            os.remove(log_file)  # Clear old logs.
+        fh = logging.FileHandler(log_file)
+        log_format = "{asctime}.{msecs:03.0f} {levelname} [{name}]: {message}"
+        log_style: Literal["%", "{", "$"] = "{"  # type: ignore
+        fh.setFormatter(logging.Formatter(fmt=log_format, style=log_style))
+        xlogger.addHandler(fh)
+        xlogger.propagate = False
 
     def wandb_init(self, first_step=0):
         if self.cfg.is_wandb_enabled and self.master_process:
@@ -229,17 +245,20 @@ class GPTTrainer:
             wandb.finish()
 
     def print_training_info(self):
-        print(
+        log_msg = (
             f"Training: Model = {self.model.__class__.__name__}, "
             f"Parameter Count: {self.model.get_num_params():,}, "
             f"Device = {self.model.device}, Data Prepared: {self.tdata.prepared}"
         )
+        print(log_msg)
         print(f"Model Config: {self.cfg.dict()}")
         print("=" * 100)
+        xlogger.info(log_msg)
+        xlogger.info(f"Model Config: {self.cfg.dict()}")
         ddp_str = f"{self.cfg.world_size} devices" if self.cfg.use_ddp else "False"
-        logger.info(
-            f"Training starts [Device = {self.cfg.device_type}, DDP: {ddp_str}, Scaler = {self.scaler.is_enabled()}]"
-        )
+        log_msg = f"Training starts [Device = {self.cfg.device_type}, DDP: {ddp_str}, Scaler = {self.scaler.is_enabled()}]"
+        logger.info(log_msg)
+        xlogger.info(log_msg)
 
     def load_checkpoint(self):
         checkpoint_dir = self.cfg.work_dir / "checkpoints"
@@ -257,7 +276,7 @@ class GPTTrainer:
             logger.warn(error_msg)
             raise ValueError(error_msg)
         best_val_loss = checkpoint["best_val_loss"]
-        print(
+        logger.info(
             f"Checkpoint restored. Trained for {iterations} iterations, Loss = {best_val_loss:.4f}"
         )
 
@@ -283,17 +302,10 @@ class GPTTrainer:
             # use AdamW instead of torch.optim.SGD
             optimizer = torch.optim.AdamW(self.model.parameters(), lr=self.cfg.learning_rate)
 
+        self.init_log_file()
+
         # optional: track gradients
         # wandb.watch(self.model)
-
-        os.remove(str(self.cfg.work_dir / "train.log"))  # Clear old logs.
-        fh = logging.FileHandler(str(self.cfg.work_dir / "train.log"))
-        log_format = "{asctime}.{msecs:03.0f} {levelname} [{name}]: {message}"
-        log_style: Literal["%", "{", "$"] = "{"  # type: ignore
-        fh.setFormatter(logging.Formatter(fmt=log_format, style=log_style))
-        xlogger.addHandler(fh)
-        xlogger.propagate = False
-
         first_step = 0
         if self.resume:
             checkpoint = self.load_checkpoint()
@@ -307,15 +319,19 @@ class GPTTrainer:
         if use_ddp:
             self.setup_ddp()
             self.pre_training_ddp()
-            self.print_estimate_loss(first_step, xlogger=xlogger)  # Print Initial Losses!
-            step, last_eval_stime = self.training_loop_ddp(optimizer, first_step=first_step)
-            self.cleanup_ddp()
             # In case of DDP, use the unwrapped DDP model to checkpoint
             raw_model = self.model.module
-        else:
             self.print_estimate_loss(first_step)  # Print Initial Losses!
-            step, last_eval_stime = self.training_loop_single(optimizer, first_step=first_step)
+            step, last_eval_stime = self.training_loop_ddp(
+                optimizer, raw_model, first_step=first_step
+            )
+            self.cleanup_ddp()
+        else:
             raw_model = self.model
+            self.print_estimate_loss(first_step)  # Print Initial Losses!
+            step, last_eval_stime = self.training_loop_single(
+                optimizer, raw_model, first_step=first_step
+            )
 
         train_time = time.time() - train_start_time
         if self.master_process:
@@ -345,18 +361,19 @@ class GPTTrainer:
             else DDP(self.model)
         )
 
-    def training_loop_single(self, optimizer, first_step=0):
+    def training_loop_single(self, optimizer, raw_model, first_step=0):
         eval_start_time = time.time()
         for step in range(first_step, self.cfg.max_iters):  ## `n` steps
             if step > first_step and step % self.cfg.eval_interval == 0:
-                self.print_estimate_loss(step, eval_start_time=eval_start_time)
+                losses = self.print_estimate_loss(step, eval_start_time=eval_start_time)
+                self.save_model(step, raw_model, optimizer, losses["val"])
                 eval_start_time = time.time()
             self.train_epoch(self.model, optimizer)
             if self.cfg.eval_only:
                 break
         return step, eval_start_time
 
-    def training_loop_ddp(self, optimizer, first_step=0):
+    def training_loop_ddp(self, optimizer, raw_model, first_step=0):
         """Run Loop with DDP - Single node"""
         running_mflops = -1
 
@@ -368,9 +385,9 @@ class GPTTrainer:
                 param_group["lr"] = lr
 
             if step > first_step and step % self.cfg.eval_interval == 0:
-                self.print_estimate_loss(
-                    step, eval_start_time=eval_start_time, lr=lr, xlogger=xlogger
-                )
+                losses = self.print_estimate_loss(step, eval_start_time=eval_start_time, lr=lr)
+                if self.master_process:
+                    self.save_model(step, raw_model, optimizer, losses["val"])
                 eval_start_time = time.time()
             elif step > first_step and step % self.cfg.log_interval == 0:
                 if self.master_process and self.cfg.verbose:
@@ -399,10 +416,12 @@ class GPTTrainer:
                     self.wandb_log(
                         step, mflops_achieved=mflops_achieved, running_mflops=running_mflops
                     )
-
-                print(
-                    f"iter {step}: loss {lossf:.4f}, time {dt*1000:.2f}ms, flops {mflops_achieved:.4f} MFlops, running mflops = {running_mflops:.4f}"
+                log_msg = (
+                    f"iter {step}: loss {lossf:.4f}, time {dt*1000:.2f}ms, "
+                    f"flops {mflops_achieved:.4f} MFlops, running mflops = {running_mflops:.4f}"
                 )
+                logger.info(log_msg)
+                xlogger.info(log_msg)
             if self.cfg.eval_only:
                 break
         return step, eval_start_time
@@ -412,21 +431,12 @@ class GPTTrainer:
         print("=" * 100)
         if train_time < 60:
             logger.info(f"Time taken = {train_time:.3f} secs")
+            xlogger.info(f"Time taken = {train_time:.3f} secs")
         else:
             mins = int(train_time // 60)
             secs = train_time % 60
             logger.info(f"Time taken = {train_time:.3f} secs - {mins} mins, {secs:.3f} secs")
-
-    # def train_single_epoch(self, optimizer):
-    #     xb, yb = self.get_batch("train")  ## xb = B x T
-
-    #     with self.ctx:
-    #         _logits, loss = self.model(xb, yb)
-    #     loss.backward()
-    #     optimizer.step()  ## change the weights based on the gradients
-
-    #     # flush the gradients as soon as we can, no need for this memory anymore
-    #     optimizer.zero_grad(set_to_none=True)
+            xlogger.info(f"Time taken = {train_time:.3f} secs - {mins} mins, {secs:.3f} secs")
 
     def train_epoch(self, model, optimizer) -> None:
         xb, yb = self.get_batch("train")  ## xb = B x T

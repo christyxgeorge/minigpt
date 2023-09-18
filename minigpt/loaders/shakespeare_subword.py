@@ -5,8 +5,8 @@ from minigpt.loaders.text_dataset import TextDataset
 
 
 class TinyShakespeareWordData(TextDataset):
-    def __init__(self, src, work_dir, verbose=False):
-        super().__init__(src, work_dir, "tiny_shakespeare.txt", verbose=verbose)
+    def __init__(self, args):
+        super().__init__(args, "tiny_shakespeare.txt")
 
     @property
     def name(self) -> str:

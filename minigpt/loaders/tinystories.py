@@ -25,22 +25,22 @@ NUM_DATA_FILES = 50
 
 
 class TinyStoriesData(BaseDataset):
-    def __init__(self, src, work_dir, verbose=False):
+    def __init__(self, args):
         self.iter_batches = {"train": None, "val": None}
         self.iter_val_batches = None
-        self.vocab_source = src  # llama2|custom;
+        self.vocab_source = args.vocab_source  # llama2|custom;
         if self.vocab_source == "llama2":
             # .bin files will be saved into llama2 directory, create it once here
-            self.bin_dir = work_dir / f"llama2"
+            self.bin_dir = args.work_dir / f"llama2"
             self.vocab_size = 32000  # the Llama 2 tokenizer has 32K tokens
         else:
             # .bin files will be saved into tok{N} directory, create it once here
+            self.bin_dir = args.work_dir / f"tok{self.vocab_size}"
             self.vocab_size = 2048
-            self.bin_dir = work_dir / f"tok{self.vocab_size}"
         os.makedirs(self.bin_dir, exist_ok=True)
 
         # Setup internal variables before calling super().__init__()
-        super().__init__(src, work_dir, verbose=verbose)
+        super().__init__(args)
 
     @property
     def name(self) -> str:
@@ -50,8 +50,8 @@ class TinyStoriesData(BaseDataset):
     def is_prepared(self) -> bool:
         """Check if the data(bin_files) have been prepared"""
         data_glob = os.path.join(self.bin_dir, "data*.bin")
-        print(f"Bin Dir = {self.bin_dir}, glob = {data_glob}")
         files = glob.glob(data_glob)
+        print(f"glob = {data_glob}, Files = {len(files)} / {NUM_DATA_FILES}")
         return len(files) == NUM_DATA_FILES
 
     def download(self, force=False):
@@ -347,6 +347,12 @@ if __name__ == "__main__":
     )
     parser.add_argument("--work-dir", dest="work_dir")
     parser.add_argument("-v", "--verbose", action="store_true", default=False)
+    parser.add_argument(
+        "--vocab-source",
+        choices=["llama2", "custom"],
+        default="llama2",
+        help="Build a custom tokenizer, or use llama2 tokenizer",
+    )
     args = parser.parse_args()
 
     if not args.work_dir:
@@ -354,8 +360,9 @@ if __name__ == "__main__":
         root_dir = path.parent.absolute()
         args.work_dir = Path(args.work_dir) if args.work_dir else root_dir / "data"
 
+    args.source = "t_stories"
     # depending on the stage call the appropriate function
-    tiny_stories = TinyStoriesData("t_stories", args.work_dir, verbose=args.verbose)
+    tiny_stories = TinyStoriesData(args)
     if args.stage == "download":
         tiny_stories.download()
     elif args.stage == "train_vocab":

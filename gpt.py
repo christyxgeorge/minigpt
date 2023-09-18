@@ -19,8 +19,8 @@ log_style: Literal["%", "{", "$"] = "{"
 logging.basicConfig(format=log_format, level=logging.DEBUG, datefmt="%I:%M:%S", style=log_style)
 
 # Reduce log level for distributed -- Maybe set TORCH_DISTRIBUTED_DEBUG?
-# logging.getLogger("torch.distributed").setLevel(logging.WARNING)
-# logging.getLogger("torch.nn.parallel.distributed").setLevel(logging.WARNING)
+logging.getLogger("torch.distributed").setLevel(logging.WARNING)
+logging.getLogger("torch.nn.parallel.distributed").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 
@@ -45,7 +45,6 @@ def get_args():
     common_parser.add_argument("-v", "--verbose", action="store_true", default=False)
     common_parser.add_argument(
         "--vocab-source",
-        dest="vocab_source",
         choices=["llama2", "custom"],
         default="llama2",
         help="Used by the tinystories dataset - Build a custom tokenizer, or use llama2 tokenizer",

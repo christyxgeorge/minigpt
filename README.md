@@ -18,7 +18,7 @@ Pending things and issues encountered
 - Check Pytorch 2.0 compile! - Fails on mac with omp.h issue!
 - Verbose is not used properly all across
 - DDP logs after mp.spawn is missing on kaggle!
-- Sample Generation can also be moved to DDP, if possible? (llama2.py)
+- Sample Generation/Inference to be made faster, if possible? (llama2.py)
 - Async prefetch of get_batch - Is it needed?
 - cfg.profile?
 - TinyStories => HF Dataset has separate train/val files in .txt format. and only GPT4 data. Can we use it?

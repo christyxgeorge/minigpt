@@ -23,11 +23,11 @@ class TextDataset(BaseDataset):
     train_bin: str = "train.bin"  # train file, if prepared
     val_bin: str = "val.bin"
 
-    def __init__(self, src, work_dir, filename, verbose=False):
-        self.filename = work_dir / filename
+    def __init__(self, args, filename):
+        self.filename = args.work_dir / filename
 
         # Setup internal variables before calling super().__init__()
-        super().__init__(src, work_dir, verbose=verbose)
+        super().__init__(args)
 
     @property
     @abstractmethod

@@ -59,9 +59,9 @@ class ModelConfig:
     # settings for learning rate decay, gradient accumulation and max iterations
     learning_rate: float = 1e-3
     decay_lr: bool = False  # whether to decay the learning rate
-    warmup_iters: int = 2000  # how many steps to warm up for
     lr_decay_iters: int = 600000  # should be ~= max_iters per Chinchilla
     min_lr: float = 6e-5  # minimum learning rate, should be ~= learning_rate/10 per Chinchilla
+    warmup_iters: int = 2000  # how many steps to warm up for before starting lr decay
     max_iters: int = 3000
     gradient_accumulation_steps: int = 5 * 8  # used to simulate larger batch sizes
 
