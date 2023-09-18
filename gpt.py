@@ -14,13 +14,13 @@ from minigpt.trainer import GPTTrainer
 
 # log_format = '%(asctime)s.%(msecs)03d %(message)s'
 # log_style: Literal["%", "{", "$"] = '%'
-log_format = "{asctime}.{msecs:3.0f} {levelname} [{name}]: {message}"
+log_format = "{asctime}.{msecs:03.0f} {levelname} [{name}]: {message}"
 log_style: Literal["%", "{", "$"] = "{"
 logging.basicConfig(format=log_format, level=logging.DEBUG, datefmt="%I:%M:%S", style=log_style)
 
 # Reduce log level for distributed -- Maybe set TORCH_DISTRIBUTED_DEBUG?
-logging.getLogger("torch.distributed").setLevel(logging.WARNING)
-logging.getLogger("torch.nn.parallel.distributed").setLevel(logging.WARNING)
+# logging.getLogger("torch.distributed").setLevel(logging.WARNING)
+# logging.getLogger("torch.nn.parallel.distributed").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 
@@ -77,6 +77,7 @@ def get_args():
     train_parser.add_argument("--decay-lr", action="store_true", default=False)
     train_parser.add_argument("--resume", action="store_true", default=False)
     train_parser.add_argument("--pretrained-model", default=None, choices=PRETRAINED_MODELS)
+    train_parser.add_argument("--log-interval", type=int, default=40)
 
     # Sub-parser for getting options to  generate
     gen_parser = subparsers.add_parser("generate", parents=[common_parser])

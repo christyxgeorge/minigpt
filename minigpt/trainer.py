@@ -7,6 +7,7 @@ import math
 import os
 import time
 from contextlib import nullcontext
+from typing import Literal
 
 import torch
 import torch.distributed as dist
@@ -15,10 +16,10 @@ import wandb
 from minigpt.config import ModelConfig
 from minigpt.loaders.base_dataset import BaseDataset
 from minigpt.models.base_model import BaseLanguageModel
-from minigpt.models.gpt_pretrained import GPT2PretainedModel
 from torch.nn.parallel import DistributedDataParallel as DDP
 
 logger = logging.getLogger(__name__)
+xlogger = logging.getLogger("trainlog")
 
 TORCH_MANUAL_SEED = 1337
 
@@ -130,7 +131,7 @@ class GPTTrainer:
         print("=" * 100)
 
     @torch.no_grad()
-    def print_estimate_loss(self, iter, eval_start_time=None, **kwargs):
+    def print_estimate_loss(self, iter, eval_start_time=None, xlogger=None, **kwargs):
         xlosses = {}
         if not self.master_process:  # Nothing to do if not master process
             return xlosses
@@ -155,9 +156,11 @@ class GPTTrainer:
         else:
             total_secs = eval_time + estimation_time
             elapsed_str = f", eval time = {eval_time:.2f} secs, est time = {estimation_time:.2f} secs [{total_secs:.2f} secs]"
-        logger.info(
-            f"step {iter:4d}: train loss = {xlosses['train']:.4f}, val loss = {xlosses['val']:.4f}{elapsed_str}"
-        )
+
+        log_msg = f"step {iter:4d}: train loss = {xlosses['train']:.4f}, val loss = {xlosses['val']:.4f}{elapsed_str}"
+        logger.info(log_msg)
+        xlogger.info(log_msg) if xlogger else print(log_msg)
+
         if eval_start_time:
             xlosses["eval_time"] = eval_time
             xlosses["est_time"] = estimation_time
@@ -235,7 +238,7 @@ class GPTTrainer:
         print("=" * 100)
         ddp_str = f"{self.cfg.world_size} devices" if self.cfg.use_ddp else "False"
         logger.info(
-            f"Training starts [Device = {self.cfg.device_type}, DDP: {ddp_str}, Scaler Enabled = {self.scaler.is_enabled()}]"
+            f"Training starts [Device = {self.cfg.device_type}, DDP: {ddp_str}, Scaler = {self.scaler.is_enabled()}]"
         )
 
     def load_checkpoint(self):
@@ -283,6 +286,14 @@ class GPTTrainer:
         # optional: track gradients
         # wandb.watch(self.model)
 
+        os.remove(str(self.cfg.work_dir / "train.log"))  # Clear old logs.
+        fh = logging.FileHandler(str(self.cfg.work_dir / "train.log"))
+        log_format = "{asctime}.{msecs:03.0f} {levelname} [{name}]: {message}"
+        log_style: Literal["%", "{", "$"] = "{"  # type: ignore
+        fh.setFormatter(logging.Formatter(fmt=log_format, style=log_style))
+        xlogger.addHandler(fh)
+        xlogger.propagate = False
+
         first_step = 0
         if self.resume:
             checkpoint = self.load_checkpoint()
@@ -296,7 +307,7 @@ class GPTTrainer:
         if use_ddp:
             self.setup_ddp()
             self.pre_training_ddp()
-            self.print_estimate_loss(first_step)  # Print Initial Losses!
+            self.print_estimate_loss(first_step, xlogger=xlogger)  # Print Initial Losses!
             step, last_eval_stime = self.training_loop_ddp(optimizer, first_step=first_step)
             self.cleanup_ddp()
             # In case of DDP, use the unwrapped DDP model to checkpoint
@@ -310,7 +321,7 @@ class GPTTrainer:
         if self.master_process:
             losses = self.print_estimate_loss(step + 1, eval_start_time=last_eval_stime)
             self.save_model(step + 1, raw_model, optimizer, losses["val"])
-            self.log_training(losses, train_time, step)
+            self.log_training(train_time)
             print(
                 f"{':'*20} Training Ended: Losses = Val: {losses['val']:.4f}, Train: {losses['train']:.4f} {':'*20}"
             )
@@ -348,6 +359,7 @@ class GPTTrainer:
     def training_loop_ddp(self, optimizer, first_step=0):
         """Run Loop with DDP - Single node"""
         running_mflops = -1
+
         eval_start_time = time.time()
         for step in range(first_step, self.cfg.max_iters):  ## `n` steps
             # determine and set the learning rate for this iteration
@@ -356,8 +368,15 @@ class GPTTrainer:
                 param_group["lr"] = lr
 
             if step > first_step and step % self.cfg.eval_interval == 0:
-                self.print_estimate_loss(step, eval_start_time=eval_start_time, lr=lr)
+                self.print_estimate_loss(
+                    step, eval_start_time=eval_start_time, lr=lr, xlogger=xlogger
+                )
                 eval_start_time = time.time()
+            elif step > first_step and step % self.cfg.log_interval == 0:
+                if self.master_process and self.cfg.verbose:
+                    xlogger.info(
+                        f"Process [{self.cfg.local_rank}] Step {step}: Learning rate = {lr}"
+                    )
 
             t0 = time.time()
             loss = self.train_gradient_accum(optimizer)
@@ -388,7 +407,7 @@ class GPTTrainer:
                 break
         return step, eval_start_time
 
-    def log_training(self, losses, train_time, step):
+    def log_training(self, train_time):
         """Logging Summary etc!"""
         print("=" * 100)
         if train_time < 60:

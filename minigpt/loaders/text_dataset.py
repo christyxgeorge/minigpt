@@ -1,20 +1,13 @@
 """Base load to handle text data"""
 from __future__ import annotations
 
-import importlib
 import logging
-import os
-import pathlib
 import pickle  # nosec
-import shutil
-import zipfile
 from abc import ABC, abstractmethod
 
 import numpy as np
-import requests  # type: ignore
 import torch
 from minigpt.loaders.base_dataset import BaseDataset
-from tqdm.auto import tqdm  # Choose tqdm or tqdm_notebook based on env
 
 logger = logging.getLogger(__name__)
 
@@ -35,14 +28,6 @@ class TextDataset(BaseDataset):
 
         # Setup internal variables before calling super().__init__()
         super().__init__(src, work_dir, verbose=verbose)
-
-    @staticmethod
-    def default_loader():
-        return DEFAULT_LOADER
-
-    @staticmethod
-    def loaders():
-        return LOADERS.keys()
 
     @property
     @abstractmethod
@@ -109,7 +94,7 @@ class TextDataset(BaseDataset):
 
         # Create data tensor!
         if self.verbose:
-            print(f"    Vocab Size = {self.vocab_size} => [{','.join(self.vocab_chars)}]")
+            print(f"    Vocab Size = {self.vocab_size}")
             print(
                 f"    Training len = {len(self.train_data)}, Validation len = {len(self.val_data)}"
             )
@@ -120,7 +105,7 @@ class TextDataset(BaseDataset):
         return self.get_batch_bin(cfg, split) if self.prepared else self.get_batch_data(cfg, split)
 
     def get_batch_data(self, cfg, split) -> tuple[torch.Tensor, torch.Tensor]:
-        """Load from the created data tensors"""
+        """Load from the created data tensors - Inefficient compared to preparing numpy files"""
         """Batch Size = Number of sequences being processed in parallel!"""
 
         assert self.train_data is not None and self.val_data is not None  # nosec
@@ -143,7 +128,7 @@ class TextDataset(BaseDataset):
         data = self.train_data if split == "train" else self.val_data
         # Generate `batch_size` random offsets
         ix = torch.randint(len(data) - cfg.block_size, (cfg.batch_size,))
-        # Create data from numpy npmemmap
+        # Create data from numpy np.memmap
         x = torch.stack(
             [torch.from_numpy((data[i : i + cfg.block_size]).astype(np.int64)) for i in ix]
         )
@@ -152,9 +137,8 @@ class TextDataset(BaseDataset):
         )
         if cfg.device_type == "cuda":
             # pin arrays x,y, which allows us to move them to GPU asynchronously (non_blocking=True)
-            x, y = x.pin_memory().to(cfg.device, non_blocking=True), y.pin_memory().to(
-                cfg.device, non_blocking=True
-            )
+            x = x.pin_memory().to(cfg.device, non_blocking=True)
+            y = y.pin_memory().to(cfg.device, non_blocking=True)
         else:
             x, y = x.to(cfg.device), y.to(cfg.device)
         return x, y

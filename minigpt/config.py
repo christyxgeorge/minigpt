@@ -92,6 +92,7 @@ class ModelConfig:
     resume: bool = False  # If we want to resume the previous training
     compile: bool = False  ## use PyTorch 2.0 to compile the model to be faster
     profile: bool = False  # TODO: use pytorch profiler, or just simple benchmarking?
+    log_interval: int = 40  # How often do we want to write to the training log
 
     def __post_init__(self):
         # Setup Device and Evaluation Parameters
