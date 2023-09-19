@@ -153,8 +153,9 @@ class BaseLanguageModel(nn.Module):
         print("=" * 100)
         ## Create the initial 'text' to generate the continuation --> Using 0 = \n or ` start_with`
         if start_with:
-            tokens = self.tdata.encode(idx)
-            idx = torch.tensor(tokens, dtype=torch.long, device=self.cfg.device)
+            tokens = tdata.encode(start_with)
+            # Unsqueeze the tensor to make it n x 1 tensor
+            idx = torch.tensor(tokens, dtype=torch.long, device=self.cfg.device).unsqueeze(dim=1)
         else:
             idx = torch.zeros((1, 1), dtype=torch.long, device=self.cfg.device)
         tokens = self.generate(idx, num_tokens=num_tokens)

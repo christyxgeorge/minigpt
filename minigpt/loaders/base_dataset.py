@@ -5,7 +5,6 @@ import importlib
 import logging
 import os
 import pathlib
-import pickle  # nosec
 import shutil
 import zipfile
 from abc import ABC, abstractmethod
@@ -74,14 +73,6 @@ class BaseDataset(ABC):
     @abstractmethod
     def download(self, force=False):
         """download the dataset"""
-
-    @abstractmethod
-    def get_metadata(self):
-        """Get metadata to save alongwith train/val.bin"""
-
-    @abstractmethod
-    def load_metadata(self, metadata):
-        """Load metadata saved alongwith train/val.bin"""
 
     @abstractmethod
     def prepare(self, force=False):

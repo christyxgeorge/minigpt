@@ -25,6 +25,7 @@ Pending things and issues encountered
 - where was it run???
 - gpu_model to compute mfu properly (t4, p100, v100, a100, h100, tpu v2, v3...)
 - model cropping (why do we need this, crop_block_size function in nanogpt/trainer.py)
+- tdata and load_metadata irrelevant for generate/resume as params are in checkpoint metadata as well!
 
 Need to check/understand the following
 

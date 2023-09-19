@@ -75,7 +75,7 @@ class TextDataset(BaseDataset):
         with open(self.metadata_file, "wb") as pklfile:
             pickle.dump(metadata, pklfile, protocol=pickle.HIGHEST_PROTOCOL)
         self.prepared = True
-        return True
+        return self.prepared
 
     def load_data(self):
         """Load Data from file"""

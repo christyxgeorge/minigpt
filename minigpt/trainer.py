@@ -200,6 +200,7 @@ class GPTTrainer:
                 "iter_num": iter,
                 "best_val_loss": val_loss,
                 "hparams": self.cfg.hparams,
+                "vocab_source": self.cfg.vocab_source,
                 "vocab_size": self.cfg.vocab_size,
             }
             checkpoint_dir = self.cfg.work_dir / "checkpoints"
@@ -269,6 +270,7 @@ class GPTTrainer:
 
     def restore_model_state(self, checkpoint, optimizer):
         self.cfg.update_hparams(**checkpoint["hparams"])
+        self.cfg.vocab_source = checkpoint.get("vocab_source", "llama2")
         state_dict = checkpoint["model"]
         iterations = checkpoint["iter_num"]
         if iterations >= self.cfg.max_iters:

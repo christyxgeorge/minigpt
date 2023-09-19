@@ -27,7 +27,6 @@ class GPTGenerator:
         self.temperature = args.temperature
         del args.start_with, args.tokens, args.temperature
 
-        self.tdata = BaseDataset.get_loader(args, load=True)
         checkpoint = self.load_checkpoint(args.model_id, args.work_dir)
         state_dict = checkpoint["model"]
         iterations = checkpoint["iter_num"]
@@ -40,7 +39,8 @@ class GPTGenerator:
             if k.startswith(unwanted_prefix):
                 state_dict[k[len(unwanted_prefix) :]] = state_dict.pop(k)
 
-        assert self.tdata.vocab_size == checkpoint["vocab_size"]  # nosec
+        args.vocab_source = checkpoint.get("vocab_source", "llama2")
+        self.tdata = BaseDataset.get_loader(args, load=True)
         self.cfg = ModelConfig(
             **vars(args),
             vocab_size=self.tdata.vocab_size,
@@ -53,7 +53,7 @@ class GPTGenerator:
     @staticmethod
     def generate(args):
         generator = GPTGenerator(args)
-        generator.generate_text()
+        generator.generate_text(generator.start_with, generator.num_tokens)
 
     def load_checkpoint(self, model_id, work_dir):
         checkpoint_dir = work_dir / "checkpoints"
@@ -63,7 +63,7 @@ class GPTGenerator:
         checkpoint = torch.load(ckpt_path, map_location=device)
         return checkpoint
 
-    def generate_text(self):
+    def generate_text(self, start_with, num_tokens, _temperature):
         # Generate Text
         self.model.generate_text(
             self.tdata, num_tokens=self.num_tokens, start_with=self.start_with

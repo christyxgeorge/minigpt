@@ -3,6 +3,7 @@ import argparse
 import glob
 import json
 import os
+import pickle  # nosec
 import random
 import tarfile
 import time
@@ -93,7 +94,7 @@ class TinyStoriesData(BaseDataset):
     def prepare(self, force=False):
         """Create train.bin and val.bin files"""
         self.download(force=force)  # Download the file, if not available
-        tokenizer_model = self.get_tokenizer_model_path(self.vocab_size)
+        tokenizer_model = self.get_tokenizer_model_path(self.vocab_source)
         if self.vocab_source == "llama2":
             print(f"Using Llama2 Tokenizer, No need to train vocab")
         elif not os.path.exists(tokenizer_model):
@@ -102,11 +103,24 @@ class TinyStoriesData(BaseDataset):
             print(f"Tokenizer already trained: {tokenizer_model}, skipping")
         self.enc = Tokenizer(tokenizer_model)
         self.pretokenize(self.vocab_size)
+
+        # store metadata
+        metadata = {"vocab_size": self.vocab_size, "vocab_source": self.vocab_source}
+        with open(self.metadata_file, "wb") as pklfile:
+            pickle.dump(metadata, pklfile, protocol=pickle.HIGHEST_PROTOCOL)
         return True
 
     def load_data(self):
         """Load Data from file"""
-        if not self.prepared:
+        if self.prepared:
+            # with open(self.metadata_file, "rb") as pklfile:
+            #     metadata = pickle.load(pklfile)  # nosec
+            metadata = {"vocab_size": self.vocab_size, "vocab_source": self.vocab_source}
+            self.vocab_source = metadata["vocab_source"]
+            self.vocab_size = metadata["vocab_size"]
+            tokenizer_model = self.get_tokenizer_model_path(self.vocab_source)
+            self.enc = Tokenizer(tokenizer_model)
+        else:
             raise NotImplementedError("Load Data not supported. Use prepare first!")
 
     def get_batch(self, cfg, split) -> tuple[torch.Tensor, torch.Tensor]:
@@ -133,7 +147,7 @@ class TinyStoriesData(BaseDataset):
 
     def encode(self, s) -> list[int]:
         """encode a string to a list of integers"""
-        return self.enc.encode_ordinary(s)
+        return self.enc.encode(s, bos=True, eos=False)
 
     def decode(self, l) -> str:
         """decode a list of integers back to a string"""
@@ -195,23 +209,17 @@ class TinyStoriesData(BaseDataset):
         elapsed_time = time.time() - start_time
         print(f"Trained tokenizer is in {prefix}.model, Time taken = {elapsed_time:.3f} secs")
 
-    def get_metadata(self):
-        """Get metadata to save alongwith train/val.bin"""
-        return {"vocab_size": self.vocab_size}
-
-    def load_metadata(self, metadata):
-        """Load metadata saved alongwith train/val.bin"""
-        self.vocab_size = metadata["vocab_size"]
-        tokenizer_model = self.get_tokenizer_model_path(self.vocab_size)
-        self.enc = Tokenizer(tokenizer_model)
-
-    def get_tokenizer_model_path(self, vocab_size):
+    def get_tokenizer_model_path(self, vocab_source):
         """
         Returns path to the sentencepiece tokenizer model for a given vocab size
         vocab_size = 0 designates the default Llama 2 tokenizer, in that case
         None is returned.
         """
-        return None if vocab_size == 0 else str(self.work_dir / f"tok{vocab_size}.model")
+        return (
+            str(self.work_dir / f"llama2.model")
+            if vocab_source == "llama2"
+            else str(self.work_dir / f"tok{self.vocab_size}.model")
+        )
 
     def pretokenize(self, vocab_size):
         # iterate the shards and tokenize all of them one by one

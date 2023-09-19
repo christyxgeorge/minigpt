@@ -9,12 +9,10 @@ from typing import List
 
 from sentencepiece import SentencePieceProcessor
 
-TOKENIZER_MODEL = "tokenizer.model"  # the llama sentencepiece tokenizer model
-
 
 class Tokenizer:
-    def __init__(self, tokenizer_model: str | None = None):
-        model_path = tokenizer_model if tokenizer_model else TOKENIZER_MODEL
+    def __init__(self, tokenizer_model: str):
+        model_path = tokenizer_model
         assert os.path.isfile(model_path), model_path  # nosec
         self.sp_model = SentencePieceProcessor(model_file=model_path)
         self.model_path = model_path
