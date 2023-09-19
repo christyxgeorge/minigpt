@@ -2,6 +2,7 @@
 import argparse
 import glob
 import json
+import logging
 import os
 import pickle  # nosec
 import random
@@ -19,10 +20,11 @@ from minigpt.loaders.base_dataset import BaseDataset
 from minigpt.loaders.tokenizer import Tokenizer
 from tqdm.auto import tqdm  # Choose tqdm or tqdm_notebook based on env
 
+logger = logging.getLogger(__name__)
+NUM_DATA_FILES = 50
+
 # This is adapated from github/llama2.c/tinystories.py
 # https://github.com/karpathy/llama2.c/blob/master/tinystories.py
-
-NUM_DATA_FILES = 50
 
 
 class TinyStoriesData(BaseDataset):
@@ -31,13 +33,13 @@ class TinyStoriesData(BaseDataset):
         self.iter_val_batches = None
         self.vocab_source = args.vocab_source  # llama2|custom;
         if self.vocab_source == "llama2":
+            self.vocab_size = 32000  # the Llama 2 tokenizer has 32K tokens
             # .bin files will be saved into llama2 directory, create it once here
             self.bin_dir = args.work_dir / f"llama2"
-            self.vocab_size = 32000  # the Llama 2 tokenizer has 32K tokens
         else:
+            self.vocab_size = 2048
             # .bin files will be saved into tok{N} directory, create it once here
             self.bin_dir = args.work_dir / f"tok{self.vocab_size}"
-            self.vocab_size = 2048
         os.makedirs(self.bin_dir, exist_ok=True)
 
         # Setup internal variables before calling super().__init__()
@@ -52,7 +54,7 @@ class TinyStoriesData(BaseDataset):
         """Check if the data(bin_files) have been prepared"""
         data_glob = os.path.join(self.bin_dir, "data*.bin")
         files = glob.glob(data_glob)
-        print(f"glob = {data_glob}, Files = {len(files)} / {NUM_DATA_FILES}")
+        logger.info(f"glob = {data_glob}, Files = {len(files)} / {NUM_DATA_FILES}")
         return len(files) == NUM_DATA_FILES
 
     def download(self, force=False):
@@ -68,39 +70,39 @@ class TinyStoriesData(BaseDataset):
         data_dir = self.work_dir / "TinyStories_all_data"
         if not data_dir.exists():
             if not data_filename.exists():
-                print(f"Downloading {data_url} to {data_filename}...")
+                logger.info(f"Downloading {data_url} to {data_filename}...")
                 self.download_file(data_url, data_filename)
             else:
-                print(f"{data_filename} already exists, skipping download...")
+                logger.info(f"{data_filename} already exists, skipping download...")
             data_dir.mkdir(parents=True, exist_ok=True)
-            print(f"Unpacking {data_filename}...")
+            logger.info(f"Unpacking {data_filename}...")
             # os.system(f"tar -xzf {data_filename} -C {data_dir}")  # nosec
             with tarfile.open(name=data_filename, mode="r:gz") as tar:
                 for member in tqdm(iterable=tar.getmembers(), total=len(tar.getmembers())):
                     tar.extract(member=member, path=data_dir)
             os.remove(data_filename)
-            print(f"Deleted {data_filename}")
+            logger.info(f"Deleted {data_filename}")
         else:
-            print(f"{data_dir} already exists, skipping unpacking...")
+            logger.info(f"{data_dir} already exists, skipping unpacking...")
 
         # print a single example just for debugging and such
         shard_filenames = sorted(glob.glob(os.path.join(data_dir, "*.json")))
         with open(shard_filenames[0], "r") as f:
             data = json.load(f)
-        print(f"Number of shards: {len(shard_filenames)}\nExample story:\n{data[0]}")
+        logger.info(f"Number of shards: {len(shard_filenames)}\nExample story:\n{data[0]}")
         elapsed_time = time.time() - start_time
-        print(f"Download Done, Time taken = {elapsed_time:.3f} secs")
+        logger.info(f"Download Done, Time taken = {elapsed_time:.3f} secs")
 
     def prepare(self, force=False):
         """Create train.bin and val.bin files"""
         self.download(force=force)  # Download the file, if not available
         tokenizer_model = self.get_tokenizer_model_path(self.vocab_source)
         if self.vocab_source == "llama2":
-            print(f"Using Llama2 Tokenizer, No need to train vocab")
+            logger.info(f"Using Llama2 Tokenizer, No need to train vocab")
         elif not os.path.exists(tokenizer_model):
             self.train_vocab(self.vocab_size)
         else:
-            print(f"Tokenizer already trained: {tokenizer_model}, skipping")
+            logger.info(f"Tokenizer already trained: {tokenizer_model}, skipping")
         self.enc = Tokenizer(tokenizer_model)
         self.pretokenize(self.vocab_size)
 
@@ -174,7 +176,7 @@ class TinyStoriesData(BaseDataset):
         data_dir = self.work_dir / "TinyStories_all_data"
         shard_filenames = sorted(glob.glob(os.path.join(data_dir, "*.json")))
 
-        print(
+        logger.info(
             f"Writing temporary file {tiny_file} with {num_shards} shards / {len(shard_filenames)}..."
         )
         with open(tiny_file, "w", encoding="utf-8") as of:
@@ -185,10 +187,10 @@ class TinyStoriesData(BaseDataset):
                     text = example["story"]
                     text = text.strip()
                     of.write(text + "\n")
-        print(f"Size is: {os.path.getsize(tiny_file) / 1024 / 1024:.2f} MB")
+        logger.info(f"Size is: {os.path.getsize(tiny_file) / 1024 / 1024:.2f} MB")
 
         # 2) train the sentencepiece model
-        print("Will now train the vocab...")
+        logger.info("Will now train the vocab...")
         spm.SentencePieceTrainer.train(
             input=str(tiny_file),
             model_prefix=prefix,
@@ -207,7 +209,9 @@ class TinyStoriesData(BaseDataset):
 
         os.remove(tiny_file)
         elapsed_time = time.time() - start_time
-        print(f"Trained tokenizer is in {prefix}.model, Time taken = {elapsed_time:.3f} secs")
+        logger.info(
+            f"Trained tokenizer is in {prefix}.model, Time taken = {elapsed_time:.3f} secs"
+        )
 
     def get_tokenizer_model_path(self, vocab_source):
         """
@@ -232,7 +236,7 @@ class TinyStoriesData(BaseDataset):
         with ProcessPoolExecutor() as executor:
             executor.map(fun, enumerate(shard_filenames))
         elapsed_time = time.time() - start_time
-        print("Pretokenization Done, Time taken = {elapsed_time:.3f} secs")
+        logger.info("Pretokenization Done, Time taken = {elapsed_time:.3f} secs")
 
     def check_file(self, shard):
         shard_basename = os.path.basename(shard)
@@ -247,7 +251,7 @@ class TinyStoriesData(BaseDataset):
         # calculate the output filename and check if it exists
         tokenized_filename, file_exists = self.check_file(shard)
         if file_exists:
-            print(f"Already saved {tokenized_filename}, skipping..")
+            logger.info(f"Already saved {tokenized_filename}, skipping..")
             return
 
         # Actually create tokens
@@ -269,7 +273,7 @@ class TinyStoriesData(BaseDataset):
 
         # calculate the average sequence length (they are separated by BOS=1)
         avg_seq_len = all_tokens.size / ((all_tokens == 1).sum())
-        print(f"Saved {tokenized_filename}, average seqlen: {avg_seq_len:.2f}")
+        logger.info(f"Saved {tokenized_filename}, average seqlen: {avg_seq_len:.2f}")
 
 
 class Task:
@@ -305,7 +309,7 @@ class PretokDataset(torch.utils.data.IterableDataset):
         # combine the worker_id and worker_rank to create a unique seed for rng
         seed = 42 + worker_id + 1337 * rank
         rng = random.Random(seed)
-        print(f"Created a PretokDataset for {self.split} data with rng seed {seed}")
+        logger.info(f"Created a PretokDataset for {self.split} data with rng seed {seed}")
         shard_filenames = sorted(glob.glob(os.path.join(self.bin_dir, "*.bin")))
         # train/test split. let's use only shard 0 for test split, rest train
         shard_filenames = shard_filenames[1:] if self.split == "train" else shard_filenames[:1]
