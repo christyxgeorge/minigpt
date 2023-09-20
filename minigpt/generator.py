@@ -1,6 +1,6 @@
 """Generate samples from the trained models"""
 import logging
-import os
+import time
 
 import torch
 from minigpt.config import ModelConfig
@@ -65,6 +65,21 @@ class GPTGenerator:
 
     def generate_text(self, start_with, num_tokens, _temperature):
         # Generate Text
+        start_time = time.time()
         self.model.generate_text(
             self.tdata, num_tokens=self.num_tokens, start_with=self.start_with
         )
+        self.log_generation(start_time, num_tokens)
+
+    def log_generation(self, start_time, num_tokens):
+        """Logging Summary etc!"""
+        elapsed_time = time.time() - start_time
+        tokens_per_sec = num_tokens / elapsed_time
+        print("=" * 100)
+        if elapsed_time < 60:
+            elapsed_str = f"{elapsed_time:.3f} secs"
+        else:
+            mins = int(elapsed_time // 60)
+            secs = elapsed_time % 60
+            elapsed_str = f"{mins} mins, {secs:.3f} secs"
+        logger.info(f"Time taken = {elapsed_str}, Tokens/Sec = {tokens_per_sec:2f}")

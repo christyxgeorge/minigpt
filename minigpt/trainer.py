@@ -1,5 +1,6 @@
 """MiniGPT Trainer"""
 
+import contextlib
 import gc
 import json
 import logging
@@ -17,6 +18,7 @@ from minigpt.config import ModelConfig
 from minigpt.loaders.base_dataset import BaseDataset
 from minigpt.models.base_model import BaseLanguageModel
 from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.profiler import ProfilerActivity, profile, record_function
 
 logger = logging.getLogger(__name__)
 xlogger = logging.getLogger("trainlog")  # TODO: To merge logger and xlogger!
@@ -61,8 +63,9 @@ class GPTTrainer:
         )
         self.model = BaseLanguageModel.get_model(self.cfg)
         self.ctx, self.scaler = self.setup_ctx_and_scaler()
-
+        self.profiler_ctx = self.setup_profiler_context()
         if self.master_process and self.cfg.verbose:
+            print(self.model)
             self.print_device_info()
 
     @staticmethod
@@ -103,6 +106,20 @@ class GPTTrainer:
         scaler_enabled = torch.cuda.is_available() and dtype == "float16"
         scaler = torch.cuda.amp.GradScaler(enabled=scaler_enabled)
         return ctx, scaler
+
+    def setup_profiler_context(self):
+        if self.cfg.profile:
+            activites = (
+                [ProfilerActivity.CPU, ProfilerActivity.CUDA]
+                if self.cfg.device_type == "cuda"
+                else [ProfilerActivity.CPU]
+            )
+            return profile(
+                activities=activites,
+                profile_memory=True,
+                record_shapes=True,
+            )
+        return nullcontext()
 
     def print_device_info(self):
         print("=" * 100)
@@ -214,8 +231,12 @@ class GPTTrainer:
         Write to a log file. This can be used to check the progress on Kaggle/Colab
         where the logger is not working with the spawned process
         """
-        log_file = str(self.cfg.work_dir / "train.log")
+        if self.cfg.world_size == 1:
+            log_file = str(self.cfg.work_dir / "train.log")
+        else:
+            log_file = str(self.cfg.work_dir / f"train{self.cfg.local_rank}.log")
         if os.path.exists(log_file):
+            print(f"Path exists: {os.path.exists(log_file)}")
             os.remove(log_file)  # Clear old logs.
         fh = logging.FileHandler(log_file)
         log_format = "{asctime}.{msecs:03.0f} {levelname} [{name}]: {message}"
@@ -246,10 +267,13 @@ class GPTTrainer:
             wandb.finish()
 
     def print_training_info(self):
+        flash = hasattr(torch.nn.functional, "scaled_dot_product_attention")
+        flash_avail = "available" if flash else "not available"
         log_msg = (
             f"Training: Model = {self.model.__class__.__name__}, "
             f"Parameter Count: {self.model.get_num_params():,}, "
-            f"Device = {self.model.device}, Data Prepared: {self.tdata.prepared}"
+            f"Device = {self.model.device}, Data Prepared: {self.tdata.prepared}, "
+            f"Flash Attention is {flash_avail}"
         )
         print(log_msg)
         print(f"Model Config: {self.cfg.dict()}")
@@ -324,25 +348,35 @@ class GPTTrainer:
             # In case of DDP, use the unwrapped DDP model to checkpoint
             raw_model = self.model.module
             self.print_estimate_loss(first_step)  # Print Initial Losses!
-            step, last_eval_stime = self.training_loop_ddp(
-                optimizer, raw_model, first_step=first_step
-            )
+            with self.profiler_ctx:
+                step, last_eval_stime = self.training_loop_ddp(
+                    optimizer, raw_model, first_step=first_step
+                )
             self.cleanup_ddp()
         else:
             raw_model = self.model
             self.print_estimate_loss(first_step)  # Print Initial Losses!
-            step, last_eval_stime = self.training_loop_single(
-                optimizer, raw_model, first_step=first_step
-            )
+            with self.profiler_ctx:
+                step, last_eval_stime = self.training_loop_single(
+                    optimizer, raw_model, first_step=first_step
+                )
 
-        train_time = time.time() - train_start_time
         if self.master_process:
             losses = self.print_estimate_loss(step + 1, eval_start_time=last_eval_stime)
             self.save_model(step + 1, raw_model, optimizer, losses["val"])
-            self.log_training(train_time)
+            self.log_training(train_start_time)
             print(
                 f"{':'*20} Training Ended: Losses = Val: {losses['val']:.4f}, Train: {losses['train']:.4f} {':'*20}"
             )
+            # Now that the profile has finished, lets print the stats
+            if not isinstance(self.profiler_ctx, contextlib.nullcontext):
+                topn = 10
+                print(
+                    self.profiler_ctx.key_averages(group_by_stack_n=topn).table(
+                        sort_by="self_cpu_time_total", row_limit=topn
+                    )
+                )
+
         self.wandb_finish()
 
     def pre_training_ddp(self):
@@ -350,8 +384,7 @@ class GPTTrainer:
         if self.cfg.compile:
             compile_start = time.time()
             logger.info("compiling the model... (takes a ~minute)")
-            import torch._dynamo
-
+            # import torch._dynamo
             # torch._dynamo.config.verbose = self.cfg.verbose
             self.model = torch.compile(self.model)  # requires PyTorch 2.0
             logger.info(f"compiled the model... (took {time.time() - compile_start} secs)")
@@ -368,11 +401,13 @@ class GPTTrainer:
         for step in range(first_step, self.cfg.max_iters):  ## `n` steps
             if step > first_step and step % self.cfg.eval_interval == 0:
                 losses = self.print_estimate_loss(step, eval_start_time=eval_start_time)
-                self.save_model(step, raw_model, optimizer, losses["val"])
+                with record_function("save_model"):
+                    self.save_model(step, raw_model, optimizer, losses["val"])
                 eval_start_time = time.time()
             self.train_epoch(self.model, optimizer)
             if self.cfg.eval_only:
                 break
+
         return step, eval_start_time
 
     def training_loop_ddp(self, optimizer, raw_model, first_step=0):
@@ -428,8 +463,9 @@ class GPTTrainer:
                 break
         return step, eval_start_time
 
-    def log_training(self, train_time):
+    def log_training(self, start_time):  # TODO: Make it a decorator!
         """Logging Summary etc!"""
+        train_time = time.time() - start_time
         print("=" * 100)
         if train_time < 60:
             logger.info(f"Time taken = {train_time:.3f} secs")
@@ -441,7 +477,8 @@ class GPTTrainer:
             xlogger.info(f"Time taken = {train_time:.3f} secs - {mins} mins, {secs:.3f} secs")
 
     def train_epoch(self, model, optimizer) -> None:
-        xb, yb = self.get_batch("train")  ## xb = B x T
+        with record_function("get_batch"):
+            xb, yb = self.get_batch("train")  ## xb = B x T
 
         with self.ctx:
             _logits, loss = self.model(xb, yb)
@@ -477,7 +514,8 @@ class GPTTrainer:
         # forward backward update, with optional gradient accumulation to simulate larger batch size
         # and using the GradScaler if data type is float16
         for micro_step in range(accum_steps):
-            xb, yb = self.get_batch("train")  ## xb = B x T
+            with record_function("get_batch"):
+                xb, yb = self.get_batch("train")  ## xb = B x T
             if self.cfg.use_ddp:
                 # in DDP training we only need to sync gradients at the last micro step.
                 # the official way to do this is with model.no_sync() context manager, but

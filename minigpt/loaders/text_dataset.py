@@ -8,6 +8,7 @@ from abc import ABC, abstractmethod
 import numpy as np
 import torch
 from minigpt.loaders.base_dataset import BaseDataset
+from torch.profiler import record_function
 
 logger = logging.getLogger(__name__)
 
@@ -110,12 +111,10 @@ class TextDataset(BaseDataset):
 
         assert self.train_data is not None and self.val_data is not None  # nosec
         data = self.train_data if split == "train" else self.val_data
-        ix = torch.randint(
-            len(data) - cfg.block_size, (cfg.batch_size,)
-        )  # Generate `batch_size` random offsets
-        x = torch.stack(
-            [data[i : i + cfg.block_size] for i in ix]
-        )  # Each sample is stacked as a row!
+        # Generate `batch_size` random offsets
+        ix = torch.randint(len(data) - cfg.block_size, (cfg.batch_size,))
+        # Each sample is stacked as a row!
+        x = torch.stack([data[i : i + cfg.block_size] for i in ix])
         y = torch.stack([data[i + 1 : i + cfg.block_size + 1] for i in ix])
         x, y = x.to(cfg.device), y.to(cfg.device)
         return x, y
