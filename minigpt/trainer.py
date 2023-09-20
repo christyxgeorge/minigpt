@@ -108,7 +108,8 @@ class GPTTrainer:
         return ctx, scaler
 
     def setup_profiler_context(self):
-        if self.cfg.profile:
+        """Enable Profiling only on the master process"""
+        if self.cfg.profile and self.master_process:
             activites = (
                 [ProfilerActivity.CPU, ProfilerActivity.CUDA]
                 if self.cfg.device_type == "cuda"
