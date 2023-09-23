@@ -24,12 +24,11 @@ Pending things and issues encountered
 - where was it run???
 - gpu_model to compute mfu properly (t4, p100, v100, a100, h100, tpu v2, v3...)
 - model cropping (why do we need this, crop_block_size function in nanogpt/trainer.py)
-- load_metadata irrelevant for generate/resume as params are in checkpoint metadata as well!
-- sort out the vocab_size issue... load_ids to be removed except in s_char?
 - n_kv_heads in llama2.c/model.py - Need to understand.
 - Check this -> from torch.utils.data import Dataset, DataLoader - alternative to the data loader model now
 - Under DDP, all the processes download the file if it does not exist... (Need to use a
-  torch.distributed.barrier) - Happens only if we support loading data from file while training!
+  torch.distributed.barrier) - Happens only if we support loading data from file while training! (TextDataset)
+- train -m m1 (with ddp on cpu) hangs... need to figure out!
 
 Need to check/understand the following
 

@@ -6,8 +6,8 @@ SCHAR_VOCAB_SIZE = 65  # 65 unique chars in the tiny shakespare dataset
 
 class TinyShakespeareCharData(TextDataset):
     def __init__(self, args):
-        self.vocab_size = SCHAR_VOCAB_SIZE
         super().__init__(args, "tiny_shakespeare.txt")
+        self.train_ids, self.val_ids = self.load_dataset()
 
     @classmethod
     def get_vocab_size(cls, _source, _vocab_soure: str | None = None):
@@ -34,19 +34,7 @@ class TinyShakespeareCharData(TextDataset):
         )
         self.download_file(data_url, self.filename)
 
-    def get_metadata(self):
-        """Get metadata to save alongwith train/val.bin"""
-        return {"vocab_chars": self.vocab_chars, "vocab_size": self.vocab_size}
-
-    def load_metadata(self, metadata):
-        """Load metadata saved alongwith train/val.bin"""
-        self.vocab_chars = metadata["vocab_chars"]
-        self.vocab_size = metadata["vocab_size"]
-        self.stoi = {ch: i for i, ch in enumerate(self.vocab_chars)}
-        self.itos = {i: ch for i, ch in enumerate(self.vocab_chars)}
-
-    def load_token_ids(self) -> tuple[list[int], list[int]]:
-        """Load token IDs from file"""
+    def load_dataset(self):
         if self.verbose:
             print("=" * 100)
             print("Loading Data [{self.filename}]...")
@@ -60,6 +48,7 @@ class TinyShakespeareCharData(TextDataset):
         self.stoi = {ch: i for i, ch in enumerate(self.vocab_chars)}
         self.itos = {i: ch for i, ch in enumerate(self.vocab_chars)}
 
+        text = self.load_vocab_chars()
         token_ids = self.encode(text)
 
         # Split in train, val
@@ -67,6 +56,10 @@ class TinyShakespeareCharData(TextDataset):
         train_ids = token_ids[:tv_split]
         val_ids = token_ids[tv_split:]
         return train_ids, val_ids
+
+    def get_token_ids(self) -> tuple[list[int], list[int]]:
+        """Load token IDs from file"""
+        return self.train_ids, self.val_ids
 
     def encode(self, s) -> list[int]:
         """encode a string to a list of integers"""

@@ -10,8 +10,9 @@ GPT2_VOCAB_SIZE = 50304
 
 class SpotifyMillionSongsData(TextDataset):
     def __init__(self, args):
-        self.vocab_size = GPT2_VOCAB_SIZE
         super().__init__(args, "spotify_millsongdata.csv")
+        self.vocab_size = GPT2_VOCAB_SIZE
+        self.enc = tiktoken.get_encoding("gpt2")
 
     @classmethod
     def get_vocab_size(cls, _source, _vocab_soure: str | None = None):
@@ -41,17 +42,7 @@ class SpotifyMillionSongsData(TextDataset):
         file_name = self.bin_dir / dataset_name
         self.download_kaggle("notshrirang", dataset_name, str(file_name))
 
-    def get_metadata(self):
-        """Get metadata to save alongwith train/val.bin"""
-        return {"vocab_size": self.vocab_size}
-
-    def load_metadata(self, metadata):
-        """Load metadata saved alongwith train/val.bin"""
-        self.enc = tiktoken.get_encoding("gpt2")
-        self.vocab_size = metadata["vocab_size"]
-        print("Loaded metadata from file")
-
-    def load_token_ids(self) -> tuple[list[int], list[int]]:
+    def get_token_ids(self) -> tuple[list[int], list[int]]:
         """Load Token IDs from Dataset"""
         if self.verbose:
             print("=" * 100)

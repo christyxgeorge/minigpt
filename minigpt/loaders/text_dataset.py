@@ -45,7 +45,7 @@ class TextDataset(BaseDataset):
         """Check if the data(bin_files) have been prepared"""
 
     @abstractmethod
-    def load_token_ids(self) -> tuple[list[int], list[int]]:
+    def get_token_ids(self) -> tuple[list[int], list[int]]:
         """Load Token IDs from Dataset"""
 
     @abstractmethod
@@ -60,26 +60,15 @@ class TextDataset(BaseDataset):
     def download(self, force=False):
         """download the dataset"""
 
-    @abstractmethod
-    def get_metadata(self):
-        """Get metadata to save alongwith train/val.bin"""
-
-    @abstractmethod
-    def load_metadata(self, metadata):
-        """Load metadata saved alongwith train/val.bin"""
-
     def prepare(self, force=False):
         """Create train.bin and val.bin files"""
         self.download(force=force)  # Download the file, if not available
-        train_ids, val_ids = self.load_token_ids()
+        train_ids, val_ids = self.get_token_ids()
         # export to bin files
         train_ids = np.array(train_ids, dtype=np.int32)
         val_ids = np.array(val_ids, dtype=np.int32)
         train_ids.tofile(self.work_dir / self.train_bin)
         val_ids.tofile(self.work_dir / self.val_bin)
-        metadata = self.get_metadata()
-        with open(self.metadata_file, "wb") as pklfile:
-            pickle.dump(metadata, pklfile, protocol=pickle.HIGHEST_PROTOCOL)
         self.prepared = True
         return self.prepared
 
@@ -89,12 +78,9 @@ class TextDataset(BaseDataset):
             # poor man's data loader [Load from train.bin, val.bin]
             self.train_data = np.memmap(self.work_dir / self.train_bin, dtype=np.int32, mode="r")
             self.val_data = np.memmap(self.work_dir / self.val_bin, dtype=np.int32, mode="r")
-            with open(self.metadata_file, "rb") as pklfile:
-                metadata = pickle.load(pklfile)  # nosec
-                self.load_metadata(metadata)
         else:
             self.download()  # Check and download the file
-            train_ids, val_ids = self.load_token_ids()
+            train_ids, val_ids = self.get_token_ids()
             self.train_data = torch.tensor(train_ids, dtype=torch.long)
             self.val_data = torch.tensor(val_ids, dtype=torch.long)
 

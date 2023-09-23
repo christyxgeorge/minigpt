@@ -9,8 +9,10 @@ GPT2_VOCAB_SIZE = 50304
 
 class TinyShakespeareWordData(TextDataset):
     def __init__(self, args):
-        self.vocab_size = GPT2_VOCAB_SIZE
         super().__init__(args, "tiny_shakespeare.txt")
+        self.vocab_size = GPT2_VOCAB_SIZE
+        # encode with tiktoken gpt2 bpe
+        self.enc = tiktoken.get_encoding("gpt2")
 
     @classmethod
     def get_vocab_size(cls, _source, _vocab_soure: str | None = None):
@@ -37,15 +39,7 @@ class TinyShakespeareWordData(TextDataset):
         )
         self.download_file(data_url, self.filename)
 
-    def get_metadata(self):
-        """Get metadata to save alongwith train/val.bin"""
-        return {"vocab_size": self.vocab_size}
-
-    def load_metadata(self, metadata):
-        """Load metadata saved alongwith train/val.bin"""
-        self.vocab_size = metadata["vocab_size"]
-
-    def load_token_ids(self) -> tuple[list[int], list[int]]:
+    def get_token_ids(self) -> tuple[list[int], list[int]]:
         """Load Token IDs from Dataset"""
         if self.verbose:
             print("=" * 100)
@@ -60,8 +54,6 @@ class TinyShakespeareWordData(TextDataset):
         train_text = text[:tv_split]
         val_text = text[tv_split:]
 
-        # encode with tiktoken gpt2 bpe
-        self.enc = tiktoken.get_encoding("gpt2")
         train_ids = self.enc.encode_ordinary(train_text)
         val_ids = self.enc.encode_ordinary(val_text)
 
