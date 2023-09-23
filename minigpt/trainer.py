@@ -238,7 +238,6 @@ class GPTTrainer:
         else:
             log_file = str(self.cfg.work_dir / f"train{self.cfg.local_rank}.log")
         if os.path.exists(log_file):
-            print(f"Path exists: {os.path.exists(log_file)}")
             os.remove(log_file)  # Clear old logs.
         fh = logging.FileHandler(log_file)
         log_format = "{asctime}.{msecs:03.0f} {levelname} [{name}]: {message}"

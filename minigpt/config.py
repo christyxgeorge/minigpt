@@ -11,6 +11,7 @@ from typing import Any, Optional
 import psutil
 import semver
 import torch
+from minigpt.loaders.base_dataset import BaseDataset
 from minigpt.models.base_model import BaseLanguageModel
 
 # Note: P100 does not support Mixed Precision...
@@ -26,10 +27,14 @@ class CommonConfig:
 
     work_dir: pathlib.PosixPath  # Working directory
     source: str
-    vocab_size: int = 0  # 0 means use the vocab size from the dataset
     model_id: str = "bg"  ## Model Version to use
-    vocab_source: str = "llama2"  # used while tokenizing `tiny stories` dataset
+    vocab_source: str = "llama2"  # Tokenizer needs to be used for the tiny stories dataset
+    vocab_size: int = 0  # Needs to be initialized from the dataset
     verbose: bool = False
+
+    def __post_init__(self):
+        # Vocab_size and Vocab source
+        self.vocab_size = BaseDataset.get_vocab_size(self.source, self.vocab_source)
 
     @property
     def common_params(self) -> dict[str, Any]:
@@ -173,7 +178,7 @@ class TrainerConfig(CommonConfig):
             n_heads=self.n_heads,
             n_embed=self.n_embed,
             block_size=self.block_size,
-            bias=self.bias,  # TODO: Check this...
+            bias=self.bias,
             vocab_size=self.vocab_size,
             dropout=self.dropout,
         )

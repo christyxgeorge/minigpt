@@ -8,6 +8,7 @@ import pathlib
 import shutil
 import zipfile
 from abc import ABC, abstractmethod
+from ast import Not
 
 import numpy as np
 import requests  # type: ignore
@@ -44,6 +45,14 @@ class BaseDataset(ABC):
             logger.info(
                 f"Text Dataset {args.source} [{self.__class__.__name__}] {prep_text} prepared"
             )
+
+    @classmethod
+    def get_vocab_size(cls, source, vocab_soure: str | None = None):
+        """Get the vocab size based on the source"""
+        current_package = importlib.import_module(__package__)
+        cls_name = LOADERS.get(source) or "TextDataset"
+        cls = getattr(current_package, cls_name)
+        return cls.get_vocab_size(vocab_soure)
 
     @staticmethod
     def default_loader():

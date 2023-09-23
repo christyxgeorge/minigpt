@@ -28,6 +28,8 @@ Pending things and issues encountered
 - sort out the vocab_size issue... load_ids to be removed except in s_char?
 - n_kv_heads in llama2.c/model.py - Need to understand.
 - Check this -> from torch.utils.data import Dataset, DataLoader - alternative to the data loader model now
+- Under DDP, all the processes download the file if it does not exist... (Need to use a
+  torch.distributed.barrier) - Happens only if we support loading data from file while training!
 
 Need to check/understand the following
 

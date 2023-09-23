@@ -4,10 +4,19 @@ import pandas as pd
 import tiktoken
 from minigpt.loaders.text_dataset import TextDataset
 
+# GPT-2 vocab_size of 50257, padded up to nearest multiple of 64 for efficiency
+GPT2_VOCAB_SIZE = 50304
+
 
 class SpotifyMillionSongsData(TextDataset):
     def __init__(self, args):
+        self.vocab_size = GPT2_VOCAB_SIZE
         super().__init__(args, "spotify_millsongdata.csv")
+
+    @classmethod
+    def get_vocab_size(cls, _source, _vocab_soure: str | None = None):
+        """Get the vocab size based on the source"""
+        return GPT2_VOCAB_SIZE
 
     @property
     def name(self) -> str:
@@ -29,7 +38,8 @@ class SpotifyMillionSongsData(TextDataset):
     def download_kaggle(self):
         # download the spotify million songs dataset
         dataset_name = "spotify-million-song-dataset"
-        self.download_kaggle("notshrirang", dataset_name, file_name)
+        file_name = self.bin_dir / dataset_name
+        self.download_kaggle("notshrirang", dataset_name, str(file_name))
 
     def get_metadata(self):
         """Get metadata to save alongwith train/val.bin"""
@@ -55,9 +65,6 @@ class SpotifyMillionSongsData(TextDataset):
         tv_split = int(0.9 * len(text))
         train_text = text[:tv_split]
         val_text = text[tv_split:]
-
-        # GPT-2 vocab_size of 50257, padded up to nearest multiple of 64 for efficiency
-        self.vocab_size = 50304
 
         # encode with tiktoken gpt2 bpe
         self.enc = tiktoken.get_encoding("gpt2")

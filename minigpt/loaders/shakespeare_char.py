@@ -1,10 +1,18 @@
 """class for managing data from the tiny shakespeare dataset"""
 from minigpt.loaders.text_dataset import TextDataset
 
+SCHAR_VOCAB_SIZE = 65  # 65 unique chars in the tiny shakespare dataset
+
 
 class TinyShakespeareCharData(TextDataset):
     def __init__(self, args):
+        self.vocab_size = SCHAR_VOCAB_SIZE
         super().__init__(args, "tiny_shakespeare.txt")
+
+    @classmethod
+    def get_vocab_size(cls, _source, _vocab_soure: str | None = None):
+        """Get the vocab size based on the source"""
+        return SCHAR_VOCAB_SIZE
 
     @property
     def name(self) -> str:

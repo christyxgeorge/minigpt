@@ -26,6 +26,10 @@ NUM_DATA_FILES = 50
 # This is adapated from github/llama2.c/tinystories.py
 # https://github.com/karpathy/llama2.c/blob/master/tinystories.py
 
+# the Llama 2 tokenizer has 32K tokens
+LLAMA2_VOCAB_SIZE = 32000
+CUSTOM_VOCAB_SIZE = 2048
+
 
 class TinyStoriesData(BaseDataset):
     def __init__(self, args):
@@ -33,17 +37,22 @@ class TinyStoriesData(BaseDataset):
         self.iter_val_batches = None
         self.vocab_source = args.vocab_source  # llama2|custom;
         if self.vocab_source == "llama2":
-            self.vocab_size = 32000  # the Llama 2 tokenizer has 32K tokens
+            self.vocab_size = LLAMA2_VOCAB_SIZE
             # .bin files will be saved into llama2 directory, create it once here
             self.bin_dir = args.work_dir / f"llama2"
         else:
-            self.vocab_size = 2048
+            self.vocab_size = CUSTOM_VOCAB_SIZE
             # .bin files will be saved into tok{N} directory, create it once here
             self.bin_dir = args.work_dir / f"tok{self.vocab_size}"
         os.makedirs(self.bin_dir, exist_ok=True)
 
         # Setup internal variables before calling super().__init__()
         super().__init__(args)
+
+    @classmethod
+    def get_vocab_size(cls, _source, vocab_source: str | None = None):
+        """Get the vocab size based on the source"""
+        return LLAMA2_VOCAB_SIZE if vocab_source == "llama2" else CUSTOM_VOCAB_SIZE
 
     @property
     def name(self) -> str:

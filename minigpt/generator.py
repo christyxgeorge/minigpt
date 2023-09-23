@@ -22,8 +22,6 @@ class GPTGenerator:
         torch.backends.cuda.matmul.allow_tf32 = True  # allow tf32 on matmul
         torch.backends.cudnn.allow_tf32 = True  # allow tf32 on cudnn
 
-        self.gen_cfg = GeneratorConfig(**vars(args))
-
         checkpoint = self.load_checkpoint(args.model_id, args.work_dir)
         state_dict = checkpoint["model"]
         iterations = checkpoint["iter_num"]
@@ -36,10 +34,11 @@ class GPTGenerator:
             if k.startswith(unwanted_prefix):
                 state_dict[k[len(unwanted_prefix) :]] = state_dict.pop(k)
 
-        self.gen_cfg.vocab_source = checkpoint.get("vocab_source", "llama2")
+        args.vocab_source = checkpoint.get("vocab_source", args.vocab_source)
+        self.gen_cfg = GeneratorConfig(**vars(args))
         self.tdata = BaseDataset.get_loader(args, load=True)
         self.train_cfg = TrainerConfig(**self.gen_cfg.common_params)
-        self.train_cfg.update_hparams(**checkpoint["hparams"])
+        self.train_cfg.update_hparams(**checkpoint["hparams"])  ## Vocab source is duplicate!
         self.model = BaseLanguageModel.get_model(self.train_cfg)
         self.model.load_state_dict(state_dict)
         checkpoint = None  # free memory as soon as we can

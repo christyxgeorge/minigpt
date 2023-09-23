@@ -26,7 +26,7 @@ class ModelArgs:
     multiple_of: int = 256  # MLP hidden layer size will be multiple of
     norm_eps: float = 1e-5
     max_seq_len: int = 2048  # Same as block size
-    dropout: float = 0.0
+    # dropout: float = 0.0  # This can be over-ridden!
 
 
 class RMSNorm(torch.nn.Module):

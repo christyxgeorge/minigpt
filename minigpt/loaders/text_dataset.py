@@ -30,6 +30,11 @@ class TextDataset(BaseDataset):
         # Setup internal variables before calling super().__init__()
         super().__init__(args)
 
+    @classmethod
+    def get_vocab_size(cls, _source, _vocab_soure: str | None = None):
+        """Get the vocab size based on the source"""
+        return NotImplementedError("Not implemented for text dataset")
+
     @property
     @abstractmethod
     def name(self) -> str:

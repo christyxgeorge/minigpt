@@ -44,7 +44,7 @@ def get_args():
     common_parser.add_argument("-p", "--ddp-port", default=argparse.SUPPRESS)
     common_parser.add_argument("-v", "--verbose", action="store_true", default=False)
     common_parser.add_argument(
-        "--vocab-source",
+        "--vocab_source",
         choices=["llama2", "custom"],
         default="llama2",
         help="Used by the tinystories dataset - Build a custom tokenizer, or use llama2 tokenizer",
