@@ -3,7 +3,7 @@ import logging
 import time
 
 import torch
-from minigpt.config import ModelConfig
+from minigpt.config import GeneratorConfig, TrainerConfig
 from minigpt.loaders.base_dataset import BaseDataset
 from minigpt.models.base_model import BaseLanguageModel
 
@@ -22,10 +22,7 @@ class GPTGenerator:
         torch.backends.cuda.matmul.allow_tf32 = True  # allow tf32 on matmul
         torch.backends.cudnn.allow_tf32 = True  # allow tf32 on cudnn
 
-        self.start_with = args.start_with
-        self.num_tokens = args.tokens
-        self.temperature = args.temperature
-        del args.start_with, args.tokens, args.temperature
+        self.gen_cfg = GeneratorConfig(**vars(args))
 
         checkpoint = self.load_checkpoint(args.model_id, args.work_dir)
         state_dict = checkpoint["model"]
@@ -39,36 +36,33 @@ class GPTGenerator:
             if k.startswith(unwanted_prefix):
                 state_dict[k[len(unwanted_prefix) :]] = state_dict.pop(k)
 
-        args.vocab_source = checkpoint.get("vocab_source", "llama2")
+        self.gen_cfg.vocab_source = checkpoint.get("vocab_source", "llama2")
         self.tdata = BaseDataset.get_loader(args, load=True)
-        self.cfg = ModelConfig(
-            **vars(args),
-            vocab_size=self.tdata.vocab_size,
-        )
-        self.cfg.update_hparams(**checkpoint["hparams"])
-        self.model = BaseLanguageModel.get_model(self.cfg)
+        self.train_cfg = TrainerConfig(**self.gen_cfg.common_params)
+        self.train_cfg.update_hparams(**checkpoint["hparams"])
+        self.model = BaseLanguageModel.get_model(self.train_cfg)
         self.model.load_state_dict(state_dict)
         checkpoint = None  # free memory as soon as we can
 
     @staticmethod
     def generate(args):
         generator = GPTGenerator(args)
-        generator.generate_text(generator.start_with, generator.num_tokens)
+        generator.generate_text(
+            generator.gen_cfg.start_with, generator.gen_cfg.tokens, generator.gen_cfg.temperature
+        )
 
     def load_checkpoint(self, model_id, work_dir):
         checkpoint_dir = work_dir / "checkpoints"
         model_name = BaseLanguageModel.model_name(model_id).lower()
         ckpt_path = checkpoint_dir / f"{model_name}.ckpt.pt"
-        device = ModelConfig.default_device()
+        device = TrainerConfig.default_device()
         checkpoint = torch.load(ckpt_path, map_location=device)
         return checkpoint
 
     def generate_text(self, start_with, num_tokens, _temperature):
         # Generate Text
         start_time = time.time()
-        self.model.generate_text(
-            self.tdata, num_tokens=self.num_tokens, start_with=self.start_with
-        )
+        self.model.generate_text(self.tdata, num_tokens=num_tokens, start_with=start_with)
         self.log_generation(start_time, num_tokens)
 
     def log_generation(self, start_time, num_tokens):

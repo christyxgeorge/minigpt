@@ -8,7 +8,7 @@ import torch
 import torch.nn as nn
 
 if TYPE_CHECKING:
-    from minigpt.config import ModelConfig
+    from minigpt.config import TrainerConfig
 
 from torch.nn import functional as F
 
@@ -23,7 +23,7 @@ MODELS = {
     "m5": "GPTLanguageModelv5",
     "m6": "GPTLanguageModelv6",
     "m7": "GPTLanguageModelv7",
-    "l2": "GPTLanguageModelLlama2",
+    "l2": "Llama2LanguageModel",
     "g2": "GPT2PretainedModel",  ## For loading pre-trained GPT2 etc.
 }
 DEFAULT_MODEL = "bg"
@@ -32,7 +32,7 @@ DEFAULT_MODEL = "bg"
 class BaseLanguageModel(nn.Module):
     """Base Model"""
 
-    def __init__(self, cfg: "ModelConfig"):
+    def __init__(self, cfg: "TrainerConfig"):
         super().__init__()
         self.cfg = cfg
 

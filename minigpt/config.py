@@ -6,12 +6,11 @@ import os
 import pathlib
 from dataclasses import asdict, dataclass
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
 import psutil
 import semver
 import torch
-import torch.nn as nn
 from minigpt.models.base_model import BaseLanguageModel
 
 # Note: P100 does not support Mixed Precision...
@@ -22,30 +21,33 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class ModelArgs:
-    # default hyperparameters (saved in checkpoint)
-    vocab_size: int
+class CommonConfig:
+    """Common Configs for all models"""
 
-    n_embed: int = 4096
-    n_layers: int = 4
-    n_heads: int = 4
-    n_kv_heads: Optional[int] = None
-    hidden_dim: Optional[int] = None
-    multiple_of: int = 256  # MLP hidden layer size will be multiple of
+    work_dir: pathlib.PosixPath  # Working directory
+    source: str
+    vocab_size: int = 0  # 0 means use the vocab size from the dataset
+    model_id: str = "bg"  ## Model Version to use
+    vocab_source: str = "llama2"  # used while tokenizing `tiny stories` dataset
+    verbose: bool = False
 
-    norm_eps: float = 1e-3
-    max_seq_len: int = 2048
-    dropout: float = 0.0
+    @property
+    def common_params(self) -> dict[str, Any]:
+        return dict(
+            work_dir=self.work_dir,
+            source=self.source,
+            vocab_size=self.vocab_size,
+            vocab_source=self.vocab_source,
+            model_id=self.model_id,
+            verbose=self.verbose,
+        )
 
 
 @dataclass
-class ModelConfig:
+class TrainerConfig(CommonConfig):
+    """Trainer Configs for all models"""
+
     # Need type annotations for all fields. asdict returns ony fields with type annotations!
-    vocab_size: int
-    work_dir: pathlib.PosixPath  # Working directory
-    source: str
-    verbose: bool = False
-    model_id: str = "b"  ## Model Version to use
     batch_size: int = 4  ## Number of independent sequences processed in parallel
 
     # Hyper-parameters
@@ -54,7 +56,7 @@ class ModelConfig:
     n_layers: int = 4
     n_heads: int = 4
     dropout: float = 0.2  # for pretraining 0 is good, for finetuning try 0.1+
-    bias: bool = False
+    bias: bool = True
 
     # settings for learning rate decay, gradient accumulation and max iterations
     learning_rate: float = 1e-3
@@ -88,7 +90,6 @@ class ModelConfig:
 
     wandb: str = "off"  # "on", "overwrite", "off"
     pretrained_model: str = "gpt-2"  ## If we need to load a pretrained model
-    vocab_source: str = "llama2"  # used while tokenizing `tiny stories` dataset
     resume: bool = False  # If we want to resume the previous training
     compile: bool = False  ## use PyTorch 2.0 to compile the model to be faster
     profile: bool = False  # TODO: use pytorch profiler, or just simple benchmarking?
@@ -123,6 +124,10 @@ class ModelConfig:
             torch.cuda.set_device(device)
             logger.info(f"[{self.local_rank}] Setting CUDA device to {device}")
 
+        self.setup_gradient_accumulation()
+
+    def setup_gradient_accumulation(self):
+        """Setup gradient accumulation steps"""
         # world_size number of processes will be training simultaneously, so we can scale
         # down the desired gradient accumulation iterations per process proportionally
         initial_grad_accum_steps = self.gradient_accumulation_steps
@@ -161,7 +166,7 @@ class ModelConfig:
         return psutil.cpu_count(logical=False)
 
     @property
-    def hparams(self):
+    def hparams(self) -> dict[str, float]:
         """Returns a dict of hyper-params to be stored in the model checkpoint"""
         return dict(
             n_layers=self.n_layers,
@@ -211,3 +216,12 @@ class ModelConfig:
     @staticmethod
     def default_device():
         return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
+@dataclass
+class GeneratorConfig(CommonConfig):
+    """Config for generating text"""
+
+    tokens: int = 1000
+    start_with: Optional[str] = None
+    temperature: float = 0.7

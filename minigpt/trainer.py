@@ -14,7 +14,7 @@ import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
 import wandb
-from minigpt.config import ModelConfig
+from minigpt.config import TrainerConfig
 from minigpt.loaders.base_dataset import BaseDataset
 from minigpt.models.base_model import BaseLanguageModel
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -55,7 +55,7 @@ class GPTTrainer:
         torch.backends.cudnn.allow_tf32 = True  # allow tf32 on cudnn
 
         self.tdata = BaseDataset.get_loader(args, load=True)
-        self.cfg = ModelConfig(
+        self.cfg = TrainerConfig(
             **vars(args),
             vocab_size=self.tdata.vocab_size,
             local_rank=local_rank,
@@ -71,7 +71,7 @@ class GPTTrainer:
     @staticmethod
     def train(args):
         """Run Loop"""
-        world_size = ModelConfig.num_devices()
+        world_size = TrainerConfig.num_devices()
 
         if args.use_ddp:
             logger.info(f"Training using DDP: World Size = {world_size}")
@@ -222,7 +222,8 @@ class GPTTrainer:
                 "vocab_size": self.cfg.vocab_size,
             }
             checkpoint_dir = self.cfg.work_dir / "checkpoints"
-            logger.info(f"Saving model checkpoint @ step {iter} to {checkpoint_dir}")
+            if self.verbose:
+                logger.info(f"Saving model checkpoint @ step {iter} to {checkpoint_dir}")
             xlogger.info(f"Saving model checkpoint @ step {iter} to {checkpoint_dir}")
             checkpoint_dir.mkdir(parents=True, exist_ok=True)  # Create, if not exists.
             torch.save(checkpoint, checkpoint_dir / f"{model.name.lower()}.ckpt.pt")
@@ -456,7 +457,7 @@ class GPTTrainer:
                     )
                 log_msg = (
                     f"iter {step}: loss {lossf:.4f}, time {dt*1000:.2f}ms, "
-                    f"flops {mflops_achieved:.4f} MFlops, running mflops = {running_mflops:.4f}"
+                    f"flops {mflops_achieved:.4f} MFlops, running mflops = {running_mflops:.4f} MFlops"
                 )
                 logger.info(log_msg)
                 xlogger.info(log_msg)

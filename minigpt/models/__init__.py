@@ -1,7 +1,7 @@
 """Model Imports"""
 from .bigram import BigramLanguageModel
 from .gpt_pretrained import GPT2PretainedModel
-from .llama2 import GPTLanguageModelLlama2
+from .llama2 import Llama2LanguageModel
 from .mgptv1 import GPTLanguageModelv1
 from .mgptv2 import GPTLanguageModelv2
 from .mgptv3 import GPTLanguageModelv3
