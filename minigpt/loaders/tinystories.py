@@ -245,7 +245,7 @@ class TinyStoriesData(BaseDataset):
         with ProcessPoolExecutor() as executor:
             executor.map(fun, enumerate(shard_filenames))
         elapsed_time = time.time() - start_time
-        logger.info("Pretokenization Done, Time taken = {elapsed_time:.3f} secs")
+        logger.info(f"Pretokenization Done, Time taken = {elapsed_time:.3f} secs")
 
     def check_file(self, shard):
         shard_basename = os.path.basename(shard)

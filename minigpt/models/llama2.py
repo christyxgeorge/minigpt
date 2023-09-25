@@ -100,13 +100,16 @@ def repeat_kv(x: torch.Tensor, n_rep: int) -> torch.Tensor:
 class FeedForward(nn.Module):
     def __init__(self, cfg):
         super().__init__()
-        if hidden_dim is None:
-            hidden_dim = 4 * cfg.n_embed
-            hidden_dim = int(2 * hidden_dim / 3)
-            hidden_dim = cfg.multiple_of * ((hidden_dim + cfg.multiple_of - 1) // cfg.multiple_of)
-        self.w1 = nn.Linear(cfg.n_embed, hidden_dim, bias=False)
-        self.w2 = nn.Linear(hidden_dim, cfg.n_embed, bias=False)
-        self.w3 = nn.Linear(cfg.n_embed, hidden_dim, bias=False)
+        # ======== TODO: Why are we doing this?
+        if cfg.hidden_dim is None:
+            cfg.hidden_dim = 4 * cfg.n_embed
+            cfg.hidden_dim = int(2 * cfg.hidden_dim / 3)
+            cfg.hidden_dim = cfg.multiple_of * (
+                (cfg.hidden_dim + cfg.multiple_of - 1) // cfg.multiple_of
+            )
+        self.w1 = nn.Linear(cfg.n_embed, cfg.hidden_dim, bias=False)
+        self.w2 = nn.Linear(cfg.hidden_dim, cfg.n_embed, bias=False)
+        self.w3 = nn.Linear(cfg.n_embed, cfg.hidden_dim, bias=False)
         self.dropout = nn.Dropout(cfg.dropout)
 
     def forward(self, x):
@@ -263,7 +266,7 @@ class Llama2LanguageModel(BaseLanguageModel):
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
 
     @staticmethod
-    def fixed_params(self):
+    def fixed_params():
         """Return a dict of fixed params for the model"""
         return asdict(Llama2ModelArgs())
 

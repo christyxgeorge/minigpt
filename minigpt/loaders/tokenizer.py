@@ -4,15 +4,23 @@
 
 import argparse
 import os
+import pathlib
 import struct
 from typing import List
 
+import requests
+import tqdm
 from sentencepiece import SentencePieceProcessor
 
 
 class Tokenizer:
     def __init__(self, tokenizer_model: str):
         model_path = tokenizer_model
+        if not os.path.isfile(model_path):
+            self.download_file(
+                "https://github.com/christyxgeorge/datasets/raw/main/llama2.model",
+                pathlib.PosixPath(model_path),
+            )
         assert os.path.isfile(model_path), model_path  # nosec
         self.sp_model = SentencePieceProcessor(model_file=model_path)
         self.model_path = model_path
@@ -65,6 +73,23 @@ class Tokenizer:
             for bytes, score in zip(tokens, scores):
                 f.write(struct.pack("fI", score, len(bytes)))
                 f.write(bytes)
+
+    # Common utility
+    def download_file(self, url: str, file_name: pathlib.PosixPath, chunk_size=1024):
+        """Helper function to download a file from a given url"""
+        if not file_name.exists():
+            resp = requests.get(url, stream=True)  # nosec
+            total = int(resp.headers.get("content-length", 0))
+            with open(file_name, "wb") as file, tqdm(
+                desc=str(file_name),
+                total=total,
+                unit="iB",
+                unit_scale=True,
+                unit_divisor=1024,
+            ) as bar:
+                for data in resp.iter_content(chunk_size=chunk_size):
+                    size = file.write(data)
+                    bar.update(size)
 
 
 if __name__ == "__main__":

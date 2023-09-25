@@ -24,7 +24,6 @@ class GPT2ModelArgs:
     n_embed: int = 768  # Embedding dimension
     n_layers: int = 12
     n_heads: int = 12
-    hidden_dim: Optional[int] = None
     block_size: int = 1024
     bias: bool = False
     batch_size: int = 12  # if gradient_accumulation_steps > 1, this is the micro-batch size
@@ -207,7 +206,7 @@ class GPT2PretainedModel(BaseLanguageModel):
         return logits, loss
 
     @staticmethod
-    def fixed_params(self):
+    def fixed_params():
         """Return a dict of fixed params for the model"""
         return asdict(GPT2ModelArgs())
 

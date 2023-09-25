@@ -53,7 +53,7 @@ class BaseLanguageModel(nn.Module):
         return next(self.parameters()).device
 
     @staticmethod
-    def get_fixed_params(self, model_id):
+    def get_fixed_params(model_id):
         current_package = importlib.import_module(__package__)
         cls_name = MODELS.get(model_id)
         if cls_name:
@@ -65,7 +65,7 @@ class BaseLanguageModel(nn.Module):
             raise ValueError(error_msg)
 
     @staticmethod
-    def fixed_params(self):
+    def fixed_params():
         """Return a dict of fixed params for the model, Empty by default"""
         return {}
 
