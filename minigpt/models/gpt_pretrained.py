@@ -1,28 +1,37 @@
-"""GPT Language Model v1: With a single attention head of `n_embed / 2`"""
+"""GPT2 Pretrained Language Model"""
 
 import logging
 import math
+from dataclasses import asdict, dataclass
+from typing import Optional
 
 import torch
 import torch.nn as nn
+from torch.nn import functional as F
 from transformers import GPT2LMHeadModel
 
 from .base_model import BaseLanguageModel
+from .blocks import LayerNorm
 
 PRETRAINED_MODELS = {"gpt2", "gpt2-medium", "gpt2-large", "gpt2-xl"}
 
 logger = logging.getLogger(__name__)
 
 
-"""
-GPT Language Model v7: Compute the Multiple heads in parallel
-"""
-import torch
-import torch.nn as nn
-from torch.nn import functional as F
-
-from .base_model import BaseLanguageModel
-from .blocks import LayerNorm
+@dataclass
+class GPT2ModelArgs:
+    # hyperparameters for the trained GPT2 model
+    n_embed: int = 768  # Embedding dimension
+    n_layers: int = 12
+    n_heads: int = 12
+    hidden_dim: Optional[int] = None
+    block_size: int = 1024
+    bias: bool = False
+    batch_size: int = 12  # if gradient_accumulation_steps > 1, this is the micro-batch size
+    gradient_accumulation_steps: int = 5 * 8  # used to simulate larger batch sizes
+    learning_rate = 6e-4  # max learning rate
+    min_lr = 6e-5  # minimum learning rate, should be ~= learning_rate/10 per Chinchilla
+    # max_iters = 600000 # total number of training iterations
 
 
 class CausalSelfAttention(nn.Module):
@@ -196,6 +205,11 @@ class GPT2PretainedModel(BaseLanguageModel):
             logits = self.lm_head(x[:, [-1], :])  # note: using list [-1] to preserve the time dim
             loss = None
         return logits, loss
+
+    @staticmethod
+    def fixed_params(self):
+        """Return a dict of fixed params for the model"""
+        return asdict(GPT2ModelArgs())
 
     @staticmethod
     def from_pretrained(cfg):

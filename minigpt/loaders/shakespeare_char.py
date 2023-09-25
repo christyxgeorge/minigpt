@@ -48,7 +48,6 @@ class TinyShakespeareCharData(TextDataset):
         self.stoi = {ch: i for i, ch in enumerate(self.vocab_chars)}
         self.itos = {i: ch for i, ch in enumerate(self.vocab_chars)}
 
-        text = self.load_vocab_chars()
         token_ids = self.encode(text)
 
         # Split in train, val

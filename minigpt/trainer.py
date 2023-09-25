@@ -62,6 +62,7 @@ class GPTTrainer:
             world_size=world_size,
         )
         self.model = BaseLanguageModel.get_model(self.cfg)
+
         self.ctx, self.scaler = self.setup_ctx_and_scaler()
         self.profiler_ctx = self.setup_profiler_context()
         if self.master_process and self.cfg.verbose:
@@ -222,7 +223,7 @@ class GPTTrainer:
                 "vocab_size": self.cfg.vocab_size,
             }
             checkpoint_dir = self.cfg.work_dir / "checkpoints"
-            if self.verbose:
+            if self.cfg.verbose:
                 logger.info(f"Saving model checkpoint @ step {iter} to {checkpoint_dir}")
             xlogger.info(f"Saving model checkpoint @ step {iter} to {checkpoint_dir}")
             checkpoint_dir.mkdir(parents=True, exist_ok=True)  # Create, if not exists.

@@ -53,6 +53,23 @@ class BaseLanguageModel(nn.Module):
         return next(self.parameters()).device
 
     @staticmethod
+    def get_fixed_params(self, model_id):
+        current_package = importlib.import_module(__package__)
+        cls_name = MODELS.get(model_id)
+        if cls_name:
+            model_cls = getattr(current_package, cls_name)
+            return model_cls.fixed_params()
+        else:
+            error_msg = f"Unknown Model ID: {model_id} - Use one of {MODELS.keys()}"
+            logger.warn(error_msg)
+            raise ValueError(error_msg)
+
+    @staticmethod
+    def fixed_params(self):
+        """Return a dict of fixed params for the model, Empty by default"""
+        return {}
+
+    @staticmethod
     def model_name(model_id) -> str:
         return MODELS.get(model_id, "BigramLanguageModel")
 

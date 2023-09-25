@@ -1,8 +1,9 @@
 """
-GPT Language Model v7: Compute the Multiple heads in parallel
+LLAM2 Model. Implemented from Scratch
 """
+import logging
 import math
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Optional, Tuple
 
 import torch
@@ -10,23 +11,23 @@ import torch.nn as nn
 from torch.nn import functional as F
 
 from .base_model import BaseLanguageModel
-from .blocks import FeedForwardDropout
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
-class ModelArgs:
-    # default hyperparameters for the Llama 7B model
-    dim: int = 4096
+class Llama2ModelArgs:
+    # Hyperparameters for the trained Llama 7B model
+    n_embed: int = 4096
     n_layers: int = 32
     n_heads: int = 32
     # Number of KV Heads (Grouped Query Attention)
     n_kv_heads: Optional[int] = None
-    vocab_size: int = 32000
     hidden_dim: Optional[int] = None
     multiple_of: int = 256  # MLP hidden layer size will be multiple of
     norm_eps: float = 1e-5
-    max_seq_len: int = 2048  # Same as block size
-    # dropout: float = 0.0  # This can be over-ridden!
+    block_size: int = 2048  # a.k.a max_seq_len
+    decay_lr: bool = False
 
 
 class RMSNorm(torch.nn.Module):
@@ -96,18 +97,44 @@ def repeat_kv(x: torch.Tensor, n_rep: int) -> torch.Tensor:
     )
 
 
+class FeedForward(nn.Module):
+    def __init__(self, cfg):
+        super().__init__()
+        if hidden_dim is None:
+            hidden_dim = 4 * cfg.n_embed
+            hidden_dim = int(2 * hidden_dim / 3)
+            hidden_dim = cfg.multiple_of * ((hidden_dim + cfg.multiple_of - 1) // cfg.multiple_of)
+        self.w1 = nn.Linear(cfg.n_embed, hidden_dim, bias=False)
+        self.w2 = nn.Linear(hidden_dim, cfg.n_embed, bias=False)
+        self.w3 = nn.Linear(cfg.n_embed, hidden_dim, bias=False)
+        self.dropout = nn.Dropout(cfg.dropout)
+
+    def forward(self, x):
+        return self.dropout(self.w2(F.silu(self.w1(x)) * self.w3(x)))
+
+
 class MultiHeadAttention(nn.Module):
     """Multiple Attention heads - with Dropout - In parallel (split/combine)"""
 
     def __init__(self, cfg):
         super().__init__()
+
+        # TODO: ==== Why do we need this?
+        model_parallel_size = 1
+        self.n_local_heads = cfg.n_heads // model_parallel_size
+        self.n_local_kv_heads = cfg.n_kv_heads // model_parallel_size
+        self.n_rep = self.n_local_heads // self.n_local_kv_heads
+        self.head_dim = cfg.n_embed // cfg.n_heads
+        # TODO: ==== Why do we need this?
+
         self.key = nn.Linear(cfg.n_embed, cfg.n_embed, bias=False)
         self.query = nn.Linear(cfg.n_embed, cfg.n_embed, bias=False)
         self.value = nn.Linear(cfg.n_embed, cfg.n_embed, bias=False)
-        self.att_dropout = nn.Dropout(cfg.dropout)
+
+        self.attention_dropout = nn.Dropout(cfg.dropout)
         self.residual_dropout = nn.Dropout(cfg.dropout)
 
-        self.proj = nn.Linear(cfg.n_embed, cfg.n_embed)
+        self.proj = nn.Linear(cfg.n_embed, cfg.n_embed)  # Final Output Projection
 
         # Local Variables
         self.flash = hasattr(torch.nn.functional, "scaled_dot_product_attention")
@@ -116,46 +143,62 @@ class MultiHeadAttention(nn.Module):
         self.cfg = cfg
 
         if not self.flash:
-            self.register_buffer(
-                "tril",
-                torch.tril(torch.ones(cfg.block_size, cfg.block_size)).view(
-                    1, 1, cfg.block_size, cfg.block_size
-                ),
-            )  ## T x T
+            print("WARNING: using slow attention. Flash Attention requires PyTorch >= 2.0")
+            mask = torch.full((1, 1, cfg.block_size, cfg.block_size), float("-inf"))
+            mask = torch.triu(mask, diagonal=1)
+            self.register_buffer("mask", mask)
 
-    def split_heads(self, x):
-        # Reshape the input to have num_heads for multi-head attention
-        B, T, _ = x.size()  # batch_size, seq_length, d_model
-        return x.view(B, T, self.num_heads, self.head_size).transpose(1, 2)
+    def forward(
+        self,
+        x,
+        freqs_cos: torch.Tensor,
+        freqs_sin: torch.Tensor,
+    ):
+        B, T, _ = x.shape
+        xq, xk, xv = self.query(x), self.key(x), self.value(x)
 
-    def combine_heads(self, x):
-        # Combine the multiple heads back to original shape
-        B, _, T, _ = x.size()
-        return x.transpose(1, 2).contiguous().view(B, T, self.cfg.n_embed)
+        xq = xq.view(B, T, self.n_local_heads, self.head_dim)
+        xk = xk.view(B, T, self.n_local_kv_heads, self.head_dim)
+        xv = xv.view(B, T, self.n_local_kv_heads, self.head_dim)
 
-    def forward(self, x):
-        _, T, C = x.shape
-        k = self.split_heads(self.key(x))  # B x num_heads x T x head_size (hs)
-        q = self.split_heads(self.query(x))  # B x num_heads x T x head_size (hs)
+        # RoPE relative positional embeddings
+        xq, xk = apply_rotary_emb(xq, xk, freqs_cos, freqs_sin)
 
+        # grouped multiquery attention: expand out keys and values
+        xk = repeat_kv(xk, self.n_rep)  # (B, T, n_local_heads, head_dim)
+        xv = repeat_kv(xv, self.n_rep)  # (B, T, n_local_heads, head_dim)
+
+        # make heads into a batch dimension
+        xq = xq.transpose(1, 2)  # (B, n_local_heads, T, head_dim)
+        xk = xk.transpose(1, 2)
+        xv = xv.transpose(1, 2)
+
+        # make heads into a batch dimension
         if self.flash:
             out = torch.nn.functional.scaled_dot_product_attention(
-                q,
-                k,
-                v,
+                xq,
+                xk,
+                xv,
                 attn_mask=None,
                 dropout_p=self.cfg.dropout if self.training else 0,
                 is_causal=True,
             )
         else:
-            att = q @ k.transpose(-2, -1) * C**-0.5  # Scaled attention
-            att = att.masked_fill(self.tril[:, :, :T, :T] == 0, float("-inf"))
-            att = F.softmax(att, dim=-1)
-            att = self.att_dropout(att)
-            v = self.split_heads(self.value(x))  # B x num_heads x T x head_size (hs)
-            out = att @ v
-        out = self.combine_heads(out)
-        return self.residual_dropout(self.proj(out))
+            # manual implementation
+            scores = torch.matmul(xq, xk.transpose(2, 3)) / math.sqrt(self.head_dim)
+            assert hasattr(self, "mask")  # nosec
+            scores = scores + self.mask[:, :, :T, :T]  # type: ignore # (B, n_local_heads, T, cache_len + T)
+            scores = F.softmax(scores.float(), dim=-1).type_as(xq)
+            scores = self.attention_dropout(scores)
+            output = torch.matmul(scores, xv)  # (B, n_local_heads, T, head_dim)
+
+        # restore time as batch dimension and concat heads
+        output = output.transpose(1, 2).contiguous().view(B, T, -1)
+
+        # final projection into the residual stream
+        output = self.proj(output)
+        output = self.residual_dropout(output)
+        return output
 
 
 class TransformerBlock(nn.Module):
@@ -167,9 +210,7 @@ class TransformerBlock(nn.Module):
         super().__init__()
         self.layer_id = layer_id
         self.sa = MultiHeadAttention(cfg)
-        self.ffwd = FeedForwardDropout(cfg)
-        # Although we implemented the layer norm below, we use the torch version of it!
-        # Normalize each token. (mean of the `n_embed` channels)
+        self.ffwd = FeedForward(cfg)
         self.attention_norm = nn.LayerNorm(cfg.n_embed)
         self.ln2 = nn.LayerNorm(cfg.n_embed)
 
@@ -208,7 +249,7 @@ class Llama2LanguageModel(BaseLanguageModel):
         # apply special scaled init to the residual projections, per GPT-2 paper
         for pn, p in self.named_parameters():
             if pn.endswith("w3.weight") or pn.endswith("wo.weight"):
-                torch.nn.init.normal_(p, mean=0.0, std=0.02 / math.sqrt(2 * params.n_layers))
+                torch.nn.init.normal_(p, mean=0.0, std=0.02 / math.sqrt(2 * cfg.n_layers))
 
         # Initialize attribute for the loss of the last forward call. This will be set if the forward is called with a targets tensor.
         self.last_loss = None
@@ -220,6 +261,11 @@ class Llama2LanguageModel(BaseLanguageModel):
                 torch.nn.init.zeros_(module.bias)
         elif isinstance(module, nn.Embedding):
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+
+    @staticmethod
+    def fixed_params(self):
+        """Return a dict of fixed params for the model"""
+        return asdict(Llama2ModelArgs())
 
     def forward(self, idx, targets=None):
         # idx, targets --> B x T (batch_size x block_size)

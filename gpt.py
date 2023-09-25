@@ -58,7 +58,7 @@ def get_args():
     prep_parser = subparsers.add_parser("prepare", parents=[common_parser])
     prep_parser.add_argument("-f", "--force", action="store_true", default=False)
 
-    # Sub-parser for getting options to  train
+    # Sub-parser for getting options to  train [Can be generated from TrainingConfig?]
     train_parser = subparsers.add_parser("train", parents=[common_parser])
     train_parser.add_argument("--batch", dest="batch_size", type=int, default=4)
     train_parser.add_argument("--block", dest="block_size", type=int, default=8)
@@ -96,6 +96,10 @@ def get_args():
             f"Error: Invalid multiple of heads [{args.n_heads}] to embedding dimensions [{args.n_embed}]"
         )
         exit(-1)
+    if args.model_id in ["g2", "l2"]:
+        # In case of GPT2 or Llama2 models, use Tinystories
+        args.source = "t_stories"
+
     if args.model_id == "g2" and not args.pretrained_model:
         print(f"Error: Pretrained model name not specified")
         exit(-2)

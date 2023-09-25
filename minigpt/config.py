@@ -53,31 +53,38 @@ class TrainerConfig(CommonConfig):
     """Trainer Configs for all models"""
 
     # Need type annotations for all fields. asdict returns ony fields with type annotations!
-    batch_size: int = 4  ## Number of independent sequences processed in parallel
+
+    ## Number of independent sequences processed in parallel
+    batch_size: int = 4  # if gradient_accumulation_steps > 1, this is the micro-batch size
+    gradient_accumulation_steps: int = 5 * 8  # used to simulate larger batch sizes
 
     # Hyper-parameters
     block_size: int = 8  ## Context Length for the prediction
     n_embed: int = 32  ## Dimension of the embedding
     n_layers: int = 4
     n_heads: int = 4
-    dropout: float = 0.2  # for pretraining 0 is good, for finetuning try 0.1+
+    dropout: float = 0.0  # for pretraining 0 is good, for finetuning try 0.1+
     bias: bool = True
 
     # settings for learning rate decay, gradient accumulation and max iterations
     learning_rate: float = 1e-3
     decay_lr: bool = False  # whether to decay the learning rate
-    lr_decay_iters: int = 600000  # should be ~= max_iters per Chinchilla
-    min_lr: float = 6e-5  # minimum learning rate, should be ~= learning_rate/10 per Chinchilla
+    lr_decay_iters: int = 3000  # should be ~= max_iters per Chinchilla
+    min_lr: float = 1e-4  # minimum learning rate, should be ~= learning_rate/10 per Chinchilla
     warmup_iters: int = 2000  # how many steps to warm up for before starting lr decay
     max_iters: int = 3000
-    gradient_accumulation_steps: int = 5 * 8  # used to simulate larger batch sizes
 
     # optimizer settings
     weight_decay: float = 1e-1
     beta1: float = 0.9
     beta2: float = 0.95
-    norm_eps: float = 1e-5  # TODO: Check where it is used!
     grad_clip: float = 1.0  # clip gradients at this value, or disable if == 0.0
+
+    # llama2 specific settings
+    n_kv_heads: Optional[int] = None  # For Grouped Query Attention. Initialize to same as n_heads
+    hidden_dim: Optional[int] = None
+    multiple_of: int = 256  # MLP hidden layer size will be multiple of
+    norm_eps: float = 1e-5
 
     # other device related config!
     use_ddp: bool = False
@@ -101,6 +108,14 @@ class TrainerConfig(CommonConfig):
     log_interval: int = 40  # How often do we want to write to the training log
 
     def __post_init__(self):
+        """Post Initialization defaults"""
+        # Setup Model Specific Args
+        fixed_params = BaseLanguageModel.get_fixed_params(self.model_id)
+        self.update_hparams(**fixed_params)  ## Update with pretrained model hyperparams
+
+        self.n_kv_heads = self.n_heads if self.n_kv_heads is None else self.n_kv_heads
+        assert self.n_heads % self.n_kv_heads == 0  # nosec
+
         # Setup Device and Evaluation Parameters
         if torch.cuda.is_available():
             self.device_type = "cuda"

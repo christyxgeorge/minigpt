@@ -67,6 +67,7 @@ class MultiHeadAttention(nn.Module):
         else:
             # manual implementation of attention
             att = q @ k.transpose(-2, -1) * C**-0.5  # Scaled attention
+            assert hasattr(self, "tril")  # nosec
             att = att.masked_fill(self.tril[:, :, :T, :T] == 0, float("-inf"))
             att = F.softmax(att, dim=-1)
             att = self.att_dropout(att)
