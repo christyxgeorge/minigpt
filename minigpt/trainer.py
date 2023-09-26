@@ -324,11 +324,9 @@ class GPTTrainer:
         """Train the model"""
         self.wandb_init()
 
-        if use_ddp:
-            optimizer = self.model.configure_optimizers(master_process=self.master_process)
-        else:
-            # use AdamW instead of torch.optim.SGD
-            optimizer = torch.optim.AdamW(self.model.parameters(), lr=self.cfg.learning_rate)
+        # use AdamW instead of torch.optim.SGD
+        # optimizer = torch.optim.AdamW(self.model.parameters(), lr=self.cfg.learning_rate)
+        optimizer = self.model.configure_optimizers(master_process=self.master_process)
 
         self.init_log_file()
 
@@ -383,7 +381,7 @@ class GPTTrainer:
 
     def clear_memory(self):
         """clear the memory"""
-        gc.collect()  # This takes a lot of time...
+        gc.collect()  # This takes a lot of time.
         torch.cuda.empty_cache()
 
     def pre_training_ddp(self):
@@ -410,7 +408,7 @@ class GPTTrainer:
                 losses = self.print_estimate_loss(step, eval_start_time=eval_start_time)
                 with record_function("save_model"):
                     self.save_model(step, raw_model, optimizer, losses["val"])
-                self.clear_memory()
+                # self.clear_memory() # Not needed
                 eval_start_time = time.time()
             self.train_single_step(self.model, optimizer)
             if self.cfg.eval_only:
@@ -433,7 +431,7 @@ class GPTTrainer:
                 losses = self.print_estimate_loss(step, eval_start_time=eval_start_time, lr=lr)
                 if self.master_process:
                     self.save_model(step, raw_model, optimizer, losses["val"])
-                self.clear_memory()
+                # self.clear_memory() # Not needed
                 eval_start_time = time.time()
             elif step > first_step and step % self.cfg.log_interval == 0:
                 if self.master_process and self.cfg.verbose:
@@ -499,7 +497,7 @@ class GPTTrainer:
         self.scaler.scale(loss).backward()
 
         # clip the gradient
-        if self.scaler.is_enabled() and self.cfg.grad_clip != 0.0:
+        if self.cfg.grad_clip != 0.0:
             self.scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(model.parameters(), self.cfg.grad_clip)
 

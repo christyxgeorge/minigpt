@@ -62,9 +62,10 @@ class MultiHeadAttentionDropOut(nn.Module):
 
 
 class ResidualTransformerBlockDropout(nn.Module):
-    """Transformer Block: Communication followed by Computation - With Residual Connections"""
-
-    """The layer norm we apply is called pre-norm. Slighly different from the original paper"""
+    """
+    Transformer Block: Communication followed by Computation - With Residual Connections
+    The layer norm we apply is called pre-norm. Slighly different from the original paper
+    """
 
     def __init__(self, cfg):
         super().__init__()

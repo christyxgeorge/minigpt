@@ -17,6 +17,9 @@ PRETRAINED_MODELS = {"gpt2", "gpt2-medium", "gpt2-large", "gpt2-xl"}
 
 logger = logging.getLogger(__name__)
 
+# Note: Since we are comparing keys with the HF pretrained model,
+# The variable names should sync up
+
 
 @dataclass
 class GPT2ModelArgs:
@@ -25,8 +28,11 @@ class GPT2ModelArgs:
     n_layers: int = 12
     n_heads: int = 12
     block_size: int = 1024
-    bias: bool = False
+    # bias = True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
+    bias: bool = True
     batch_size: int = 12  # if gradient_accumulation_steps > 1, this is the micro-batch size
+    # GPT-2 vocab_size of 50257, padded up to nearest multiple of 64 for efficiency
+    vocab_size: int = 50304
     gradient_accumulation_steps: int = 5 * 8  # used to simulate larger batch sizes
     learning_rate = 6e-4  # max learning rate
     min_lr = 6e-5  # minimum learning rate, should be ~= learning_rate/10 per Chinchilla
@@ -38,18 +44,17 @@ class CausalSelfAttention(nn.Module):
 
     def __init__(self, cfg):
         super().__init__()
-        self.key = nn.Linear(cfg.n_embed, cfg.n_embed, bias=cfg.bias)
-        self.query = nn.Linear(cfg.n_embed, cfg.n_embed, bias=cfg.bias)
-        self.value = nn.Linear(cfg.n_embed, cfg.n_embed, bias=cfg.bias)
-        self.att_dropout = nn.Dropout(cfg.dropout)
-        self.residual_dropout = nn.Dropout(cfg.dropout)
 
-        self.proj = nn.Linear(cfg.n_embed, cfg.n_embed)
+        # key, query, value projections for all heads, but in a batch
+        self.c_attn = nn.Linear(cfg.n_embed, 3 * cfg.n_embed, bias=cfg.bias)
+        self.attn_dropout = nn.Dropout(cfg.dropout)
+        self.resid_dropout = nn.Dropout(cfg.dropout)
+
+        self.c_proj = nn.Linear(cfg.n_embed, cfg.n_embed)
 
         # Local Variables
         self.flash = hasattr(torch.nn.functional, "scaled_dot_product_attention")
         self.head_size = cfg.n_embed // cfg.n_heads
-        self.num_heads = cfg.n_heads
         self.cfg = cfg
 
         if not self.flash:
@@ -61,21 +66,11 @@ class CausalSelfAttention(nn.Module):
                 ),
             )  ## T x T
 
-    def split_heads(self, x):
-        # Reshape the input to have num_heads for multi-head attention
-        B, T, _ = x.size()  # batch_size, seq_length, d_model
-        return x.view(B, T, self.num_heads, self.head_size).transpose(1, 2)
-
-    def combine_heads(self, x):
-        # Combine the multiple heads back to original shape
-        B, _, T, _ = x.size()
-        return x.transpose(1, 2).contiguous().view(B, T, self.cfg.n_embed)
-
     def forward(self, x):
-        _, T, C = x.shape
-        k = self.split_heads(self.key(x))  # B x num_heads x T x head_size (hs)
-        q = self.split_heads(self.query(x))  # B x num_heads x T x head_size (hs)
-        v = self.split_heads(self.value(x))  # B x num_heads x T x head_size (hs)
+        B, T, C = x.shape  # x.size()
+
+        # calculate query, key, values for all heads in batch and move head forward to be the batch dim
+        q, k, v = self.c_attn(x).split(self.cfg.n_embed, dim=2)
 
         # causal self-attention; Self-attend: (B, nh, T, hs) x (B, nh, hs, T) -> (B, nh, T, T)
         if self.flash:
@@ -90,13 +85,15 @@ class CausalSelfAttention(nn.Module):
             )
         else:
             # manual implementation of attention
-            att = q @ k.transpose(-2, -1) * C**-0.5  # Scaled attention
-            att = att.masked_fill(self.tril[:, :, :T, :T] == 0, float("-inf"))
+            att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))  # Scaled attention
+            att = att.masked_fill(self.bias[:, :, :T, :T] == 0, float("-inf"))
             att = F.softmax(att, dim=-1)
-            att = self.att_dropout(att)
+            att = self.attn_dropout(att)
             out = att @ v  # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
-        out = self.combine_heads(out)
-        return self.residual_dropout(self.proj(out))
+
+        # re-assemble all head outputs side by side
+        out = out.transpose(1, 2).contiguous().view(B, T, C)
+        return self.resid_dropout(self.c_proj(out))
 
 
 class MLP(nn.Module):
@@ -108,9 +105,9 @@ class MLP(nn.Module):
 
     def __init__(self, cfg):
         super().__init__()
-        self.c_fc = nn.Linear(cfg.n_embed, 4 * cfg.n_embed, bias=True)  # cfg.bias)
+        self.c_fc = nn.Linear(cfg.n_embed, 4 * cfg.n_embed, bias=cfg.bias)
         self.gelu = nn.GELU()
-        self.c_proj = nn.Linear(4 * cfg.n_embed, cfg.n_embed, bias=True)  # cfg.bias)
+        self.c_proj = nn.Linear(4 * cfg.n_embed, cfg.n_embed, bias=cfg.bias)
         self.dropout = nn.Dropout(cfg.dropout)
 
     def forward(self, x):
@@ -122,23 +119,24 @@ class MLP(nn.Module):
 
 
 class TransformerBlock(nn.Module):
-    """Transformer Block: Communication followed by Computation - With Residual Connections"""
-
-    """The layer norm we apply is called pre-norm. Slighly different from the original paper"""
+    """
+    Transformer Block: Communication followed by Computation - With Residual Connections
+    The layer norm we apply is called pre-norm. Slighly different from the original paper
+    """
 
     def __init__(self, cfg):
         super().__init__()
         # We use the LayerNorm with the optional bias (GPT2 models dont use bias)
-        self.ln1 = LayerNorm(cfg.n_embed, cfg.bias)
-        self.sa = CausalSelfAttention(cfg)
-        self.ln2 = LayerNorm(cfg.n_embed, cfg.bias)
-        self.ffwd = MLP(cfg)
+        self.ln_1 = LayerNorm(cfg.n_embed, cfg.bias)
+        self.attn = CausalSelfAttention(cfg)
+        self.ln_2 = LayerNorm(cfg.n_embed, cfg.bias)
+        self.mlp = MLP(cfg)  # Feed forward with GELU
 
     def forward(self, x):
         # Apply the attention heads on the pre-norm'ed `x`
-        x = x + self.sa(self.ln1(x))
+        x = x + self.attn(self.ln_1(x))
         # B x T x C # Positional feed-forward on the pre-norm'ed `x`
-        x = x + self.ffwd(self.ln2(x))
+        x = x + self.mlp(self.ln_2(x))
         return x
 
 
@@ -154,7 +152,8 @@ class GPT2PretainedModel(BaseLanguageModel):
                 ln_f=LayerNorm(cfg.n_embed, bias=cfg.bias),
             )
         )
-        self.lm_head = nn.Linear(cfg.n_embed, cfg.vocab_size, bias=cfg.bias)
+        self.lm_head = nn.Linear(cfg.n_embed, cfg.vocab_size, bias=False)
+
         # with weight tying when using torch.compile() some warnings get generated:
         # "UserWarning: functional_call was passed multiple values for tied weights.
         # This behavior is deprecated and will be an error in future versions"
@@ -206,11 +205,6 @@ class GPT2PretainedModel(BaseLanguageModel):
         return logits, loss
 
     @staticmethod
-    def fixed_params():
-        """Return a dict of fixed params for the model"""
-        return asdict(GPT2ModelArgs())
-
-    @staticmethod
     def from_pretrained(cfg):
         model_type = cfg.pretrained_model
         logger.info(f"loading weights for pretrained gpt: {model_type}")
@@ -228,6 +222,7 @@ class GPT2PretainedModel(BaseLanguageModel):
         config_args["vocab_size"] = 50257  # always 50257 for GPT model checkpoints
         config_args["block_size"] = 1024  # always 1024 for GPT model checkpoints
         config_args["bias"] = True  # always True for GPT model checkpoints
+        config_args["dropout"] = 0.1  # The HF pretrained model has a dropout of 0.1
 
         # create a from-scratch initialized `gpt2_pretrained` model
         cfg.update_hparams(**config_args)
@@ -245,20 +240,21 @@ class GPT2PretainedModel(BaseLanguageModel):
 
         # copy while ensuring all of the parameters are aligned and match in names and shapes
         sd_keys_hf = sd_hf.keys()
-        sd_keys_hf = [
-            k for k in sd_keys_hf if not k.endswith(".attn.masked_bias")
-        ]  # ignore these, just a buffer
-        sd_keys_hf = [
-            k for k in sd_keys_hf if not k.endswith(".attn.bias")
-        ]  # same, just the mask (buffer)
+
+        # ignore these, just a buffer
+        sd_keys_hf = [k for k in sd_keys_hf if not k.endswith(".attn.masked_bias")]
+        # same, just the mask (buffer)
+        sd_keys_hf = [k for k in sd_keys_hf if not k.endswith(".attn.bias")]
+
+        # basically the openai checkpoints use a "Conv1D" module, but we only want to use a vanilla Linear
+        # this means that we have to transpose these weights when we import them
         transposed = [
             "attn.c_attn.weight",
             "attn.c_proj.weight",
             "mlp.c_fc.weight",
             "mlp.c_proj.weight",
         ]
-        # basically the openai checkpoints use a "Conv1D" module, but we only want to use a vanilla Linear
-        # this means that we have to transpose these weights when we import them
+
         assert len(sd_keys_hf) == len(
             sd_keys
         ), f"mismatched keys: {len(sd_keys_hf)} != {len(sd_keys)}"  # nosec

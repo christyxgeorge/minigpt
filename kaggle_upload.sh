@@ -6,11 +6,11 @@ DS_NAME="cxgeorge/minigpt"
 mkdir -p kaggle/
 find . -name '*.py' ! -path './__pycache__/*' ! -path './.history/*' -exec ditto {} kaggle/{} \; 
 
-if kaggle datasets list --mine | grep -q 'cxgeorge/minigpt' ; then
+if kaggle datasets list --mine | grep -q "${DS_NAME}" ; then
     echo "Dataset already exists, Updating to new version..."
 
     # Download Metadata file
-    kaggle datasets metadata -p ./kaggle cxgeorge/minigpt
+    kaggle datasets metadata -p ./kaggle ${DS_NAME}
 
     # Update to new version
     kaggle datasets version -p ./kaggle -m "Updated dataset" --dir-mode zip

@@ -100,7 +100,7 @@ def repeat_kv(x: torch.Tensor, n_rep: int) -> torch.Tensor:
 class FeedForward(nn.Module):
     def __init__(self, cfg):
         super().__init__()
-        # ======== TODO: Why are we doing this?
+        # ======== TODO: Why are we doing this? Transformer paper uses 4?
         if cfg.hidden_dim is None:
             cfg.hidden_dim = 4 * cfg.n_embed
             cfg.hidden_dim = int(2 * cfg.hidden_dim / 3)
@@ -178,7 +178,7 @@ class MultiHeadAttention(nn.Module):
 
         # make heads into a batch dimension
         if self.flash:
-            out = torch.nn.functional.scaled_dot_product_attention(
+            output = torch.nn.functional.scaled_dot_product_attention(
                 xq,
                 xk,
                 xv,
@@ -205,24 +205,23 @@ class MultiHeadAttention(nn.Module):
 
 
 class TransformerBlock(nn.Module):
-    """Transformer Block: Communication followed by Computation - With Residual Connections"""
-
-    """The layer norm we apply is called pre-norm. Slighly different from the original paper"""
+    """
+    Transformer Block: Communication followed by Computation - With Residual Connections
+    The layer norm we apply is called pre-norm. Slighly different from the original paper
+    """
 
     def __init__(self, layer_id, cfg):
         super().__init__()
         self.layer_id = layer_id
-        self.sa = MultiHeadAttention(cfg)
-        self.ffwd = FeedForward(cfg)
-        self.attention_norm = nn.LayerNorm(cfg.n_embed)
-        self.ln2 = nn.LayerNorm(cfg.n_embed)
+        self.attention = MultiHeadAttention(cfg)
+        self.feed_forward = FeedForward(cfg)
+        self.attention_norm = RMSNorm(cfg.n_embed, eps=cfg.norm_eps)
+        self.ffn_norm = RMSNorm(cfg.n_embed, eps=cfg.norm_eps)
 
     def forward(self, x, freqs_cos, freqs_sin):
-        # Apply the attention heads on the pre-norm'ed `x`
-        x = x + self.sa(self.ln1(x))
-        # B x T x C # Positional feed-forward on the pre-norm'ed `x`
-        x = x + self.ffwd(self.ln2(x))
-        return x
+        h = x + self.attention.forward(self.attention_norm(x), freqs_cos, freqs_sin)
+        out = h + self.feed_forward.forward(self.ffn_norm(h))
+        return out
 
 
 class Llama2LanguageModel(BaseLanguageModel):
@@ -241,9 +240,7 @@ class Llama2LanguageModel(BaseLanguageModel):
         self.tok_embeddings.weight = self.output.weight
 
         # some useful precompute for the RoPE relative positional embeddings
-        freqs_cos, freqs_sin = precompute_freqs_cis(
-            self.params.dim // cfg.n_heads, self.params.max_seq_len
-        )
+        freqs_cos, freqs_sin = precompute_freqs_cis(cfg.n_embed // cfg.n_heads, cfg.block_size)
         self.register_buffer("freqs_cos", freqs_cos, persistent=False)
         self.register_buffer("freqs_sin", freqs_sin, persistent=False)
 
@@ -264,11 +261,6 @@ class Llama2LanguageModel(BaseLanguageModel):
                 torch.nn.init.zeros_(module.bias)
         elif isinstance(module, nn.Embedding):
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
-
-    @staticmethod
-    def fixed_params():
-        """Return a dict of fixed params for the model"""
-        return asdict(Llama2ModelArgs())
 
     def forward(self, idx, targets=None):
         # idx, targets --> B x T (batch_size x block_size)

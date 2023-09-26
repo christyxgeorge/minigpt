@@ -1,5 +1,6 @@
 """Generate samples from the trained models"""
 import logging
+import stat
 import time
 
 import torch
@@ -47,8 +48,25 @@ class GPTGenerator:
     def generate(args):
         generator = GPTGenerator(args)
         generator.generate_text(
-            generator.gen_cfg.start_with, generator.gen_cfg.tokens, generator.gen_cfg.temperature
+            generator.gen_cfg.start_with,
+            generator.gen_cfg.tokens,
+            generator.gen_cfg.temperature,
+            generator.gen_cfg.top_k,
         )
+
+    @staticmethod
+    def checkpoints(args):
+        """List all the checkpoints"""
+        source_dir = args.work_dir.parents[0]
+        for source in BaseDataset.loaders():
+            checkpoint_dir = source_dir / source / "checkpoints"
+            device = TrainerConfig.default_device()
+            checkpoints = checkpoint_dir.glob("*.ckpt.pt")
+            for ckpt_file in checkpoints:
+                checkpoint = torch.load(ckpt_file, map_location=device)
+                print(f"Checkpoint Info: Model {ckpt_file}")
+                print(f"    Iterations Completed: {checkpoint['iter_num']}")
+                print(f"    Best Validation Loss: {checkpoint['best_val_loss']}")
 
     def load_checkpoint(self, model_id, work_dir):
         checkpoint_dir = work_dir / "checkpoints"
@@ -58,10 +76,16 @@ class GPTGenerator:
         checkpoint = torch.load(ckpt_path, map_location=device)
         return checkpoint
 
-    def generate_text(self, start_with, num_tokens, _temperature):
+    def generate_text(self, start_with, num_tokens, temperature, top_k):
         # Generate Text
         start_time = time.time()
-        self.model.generate_text(self.tdata, num_tokens=num_tokens, start_with=start_with)
+        self.model.generate_text(
+            self.tdata,
+            num_tokens=num_tokens,
+            start_with=start_with,
+            temperature=temperature,
+            top_k=top_k,
+        )
         self.log_generation(start_time, num_tokens)
 
     def log_generation(self, start_time, num_tokens):

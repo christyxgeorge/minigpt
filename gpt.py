@@ -77,14 +77,18 @@ def get_args():
     train_parser.add_argument("--profile", action="store_true", default=False)
     train_parser.add_argument("--decay-lr", action="store_true", default=False)
     train_parser.add_argument("--resume", action="store_true", default=False)
-    train_parser.add_argument("--pretrained-model", default=None, choices=PRETRAINED_MODELS)
+    train_parser.add_argument("--pretrained-model", default="gpt2", choices=PRETRAINED_MODELS)
     train_parser.add_argument("--log-interval", type=int, default=40)
 
     # Sub-parser for getting options to  generate
     gen_parser = subparsers.add_parser("generate", parents=[common_parser])
     gen_parser.add_argument("--tokens", type=int, default=1000)
     gen_parser.add_argument("--start-with", default=None)
-    gen_parser.add_argument("-t", "--temperature", type=int, default=0.7)
+    gen_parser.add_argument("-t", "--temperature", type=float, default=0.7)
+    gen_parser.add_argument("-k", "--top-k", type=int, default=200)
+
+    # Sub-parser for getting options to  generate
+    ckp_parser = subparsers.add_parser("checkpoints", parents=[common_parser])
 
     args = parser.parse_args()
     # print(f"Args = {args}")
@@ -97,7 +101,7 @@ def get_args():
         )
         exit(-1)
     if args.model_id in ["g2", "l2"]:
-        # In case of GPT2 or Llama2 models, use Tinystories
+        # In case of GPT2 or Llama2 models, use only Tinystories
         args.source = "t_stories"
 
     if args.model_id == "g2" and not args.pretrained_model:
@@ -140,6 +144,8 @@ if __name__ == "__main__":
         GPTTrainer.train(args)
     elif command == "generate":
         GPTGenerator.generate(args)
+    elif command == "checkpoints":
+        GPTGenerator.checkpoints(args)
     else:
         print(
             f"Invalid Command: {command} => Should be one of `download`, `prepare`, `train` or `generate`"

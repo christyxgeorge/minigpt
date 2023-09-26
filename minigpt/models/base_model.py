@@ -53,23 +53,6 @@ class BaseLanguageModel(nn.Module):
         return next(self.parameters()).device
 
     @staticmethod
-    def get_fixed_params(model_id):
-        current_package = importlib.import_module(__package__)
-        cls_name = MODELS.get(model_id)
-        if cls_name:
-            model_cls = getattr(current_package, cls_name)
-            return model_cls.fixed_params()
-        else:
-            error_msg = f"Unknown Model ID: {model_id} - Use one of {MODELS.keys()}"
-            logger.warn(error_msg)
-            raise ValueError(error_msg)
-
-    @staticmethod
-    def fixed_params():
-        """Return a dict of fixed params for the model, Empty by default"""
-        return {}
-
-    @staticmethod
     def model_name(model_id) -> str:
         return MODELS.get(model_id, "BigramLanguageModel")
 
@@ -164,7 +147,7 @@ class BaseLanguageModel(nn.Module):
             loss = F.cross_entropy(logits, targets)
         return loss
 
-    def generate_text(self, tdata, num_tokens=200, start_with=None):
+    def generate_text(self, tdata, num_tokens=200, start_with=None, temperature=0.7, top_k=None):
         print("=" * 100)
         print(f"  Generating Text [{num_tokens} tokens]")
         print("=" * 100)
@@ -175,7 +158,7 @@ class BaseLanguageModel(nn.Module):
             idx = torch.tensor(tokens, dtype=torch.long, device=self.cfg.device).unsqueeze(dim=1)
         else:
             idx = torch.zeros((1, 1), dtype=torch.long, device=self.cfg.device)
-        tokens = self.generate(idx, num_tokens=num_tokens)
+        tokens = self.generate(idx, num_tokens=num_tokens, temperature=temperature, top_k=top_k)
         print(tdata.decode(tokens[0].tolist()))
         print("=" * 100)
 

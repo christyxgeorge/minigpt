@@ -84,7 +84,7 @@ class TransformerBlock(nn.Module):
 
     def __init__(self, cfg):
         super().__init__()
-        # We use the LayerNorm with the optional bias (GPT2 models dont use bias)
+        # We use the LayerNorm with the optional bias
         self.ln1 = LayerNorm(cfg.n_embed, cfg.bias)
         self.sa = MultiHeadAttention(cfg)
         self.ln2 = LayerNorm(cfg.n_embed, cfg.bias)

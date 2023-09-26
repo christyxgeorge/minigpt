@@ -101,7 +101,7 @@ class TrainerConfig(CommonConfig):
     eval_only: bool = False  # if True, script exits right after the first eval
 
     wandb: str = "off"  # "on", "overwrite", "off"
-    pretrained_model: str = "gpt-2"  ## If we need to load a pretrained model
+    pretrained_model: str = "gpt2"  ## If we need to load a pretrained model
     resume: bool = False  # If we want to resume the previous training
     compile: bool = False  ## use PyTorch 2.0 to compile the model to be faster
     profile: bool = False  # TODO: use pytorch profiler, or just simple benchmarking?
@@ -110,8 +110,6 @@ class TrainerConfig(CommonConfig):
     def __post_init__(self):
         """Post Initialization defaults"""
         # Setup Model Specific Args
-        fixed_params = BaseLanguageModel.get_fixed_params(self.model_id)
-        self.update_hparams(**fixed_params)  ## Update with pretrained model hyperparams
 
         self.n_kv_heads = self.n_heads if self.n_kv_heads is None else self.n_kv_heads
         assert self.n_heads % self.n_kv_heads == 0  # nosec
@@ -144,7 +142,10 @@ class TrainerConfig(CommonConfig):
             torch.cuda.set_device(device)
             logger.info(f"[{self.local_rank}] Setting CUDA device to {device}")
 
-        self.setup_gradient_accumulation()
+        if self.gradient_accumulation_steps > self.world_size:
+            self.setup_gradient_accumulation()
+        else:
+            self.gradient_accumulation_steps = 1
 
     def setup_gradient_accumulation(self):
         """Setup gradient accumulation steps"""
@@ -168,7 +169,7 @@ class TrainerConfig(CommonConfig):
                     f"world size = {self.world_size}, "
                     f"gradient_accumulation_steps = {self.gradient_accumulation_steps}, "
                 )
-                logger.info(f"tokens per iteration [per process] will be: {tokens_per_iter:,}")
+            logger.info(f"tokens per iteration [per process] will be: {tokens_per_iter:,}")
 
     @property
     def is_wandb_enabled(self) -> bool:
@@ -245,3 +246,4 @@ class GeneratorConfig(CommonConfig):
     tokens: int = 1000
     start_with: Optional[str] = None
     temperature: float = 0.7
+    top_k: int = 200
