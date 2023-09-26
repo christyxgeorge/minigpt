@@ -10,7 +10,7 @@ class TinyShakespeareCharData(TextDataset):
         self.train_ids, self.val_ids = self.load_dataset()
 
     @classmethod
-    def get_vocab_size(cls, _source, _vocab_soure: str | None = None):
+    def get_vocab_size(cls, source, model_id):
         """Get the vocab size based on the source"""
         return SCHAR_VOCAB_SIZE
 

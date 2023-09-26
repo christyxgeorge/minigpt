@@ -43,12 +43,6 @@ def get_args():
     common_parser.add_argument("-d", "--work-dir")
     common_parser.add_argument("-p", "--ddp-port", default=argparse.SUPPRESS)
     common_parser.add_argument("-v", "--verbose", action="store_true", default=False)
-    common_parser.add_argument(
-        "--vocab_source",
-        choices=["llama2", "custom"],
-        default="llama2",
-        help="Used by the tinystories dataset - Build a custom tokenizer, or use llama2 tokenizer",
-    )
 
     # Sub-parser for getting options to download the data
     down_parser = subparsers.add_parser("download", parents=[common_parser])
@@ -104,7 +98,7 @@ def get_args():
         # In case of GPT2 or Llama2 models, use only Tinystories
         args.source = "t_stories"
 
-    if args.model_id == "g2" and not args.pretrained_model:
+    if command == "train" and args.model_id == "g2" and not args.pretrained_model:
         print(f"Error: Pretrained model name not specified")
         exit(-2)
 

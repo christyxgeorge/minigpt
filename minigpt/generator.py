@@ -35,7 +35,6 @@ class GPTGenerator:
             if k.startswith(unwanted_prefix):
                 state_dict[k[len(unwanted_prefix) :]] = state_dict.pop(k)
 
-        args.vocab_source = checkpoint.get("vocab_source", args.vocab_source)
         self.gen_cfg = GeneratorConfig(**vars(args))
         self.tdata = BaseDataset.get_loader(args, load=True)
         self.train_cfg = TrainerConfig(**self.gen_cfg.common_params)
@@ -64,9 +63,10 @@ class GPTGenerator:
             checkpoints = checkpoint_dir.glob("*.ckpt.pt")
             for ckpt_file in checkpoints:
                 checkpoint = torch.load(ckpt_file, map_location=device)
-                print(f"Checkpoint Info: Model {ckpt_file}")
+                ckpt_name = ckpt_file.stem.replace(".ckpt", "")
+                print(f"Checkpoint Info: Source {source} / Model {ckpt_name}")
                 print(f"    Iterations Completed: {checkpoint['iter_num']}")
-                print(f"    Best Validation Loss: {checkpoint['best_val_loss']}")
+                print(f"    Best Validation Loss: {checkpoint['best_val_loss']:.04f}")
 
     def load_checkpoint(self, model_id, work_dir):
         checkpoint_dir = work_dir / "checkpoints"

@@ -2,10 +2,8 @@
 
 import pandas as pd
 import tiktoken
+from minigpt.loaders.base_dataset import GPT2_VOCAB_SIZE
 from minigpt.loaders.text_dataset import TextDataset
-
-# GPT-2 vocab_size of 50257, padded up to nearest multiple of 64 for efficiency
-GPT2_VOCAB_SIZE = 50304
 
 
 class SpotifyMillionSongsData(TextDataset):
@@ -15,7 +13,7 @@ class SpotifyMillionSongsData(TextDataset):
         self.enc = tiktoken.get_encoding("gpt2")
 
     @classmethod
-    def get_vocab_size(cls, _source, _vocab_soure: str | None = None):
+    def get_vocab_size(cls, _source, model_id):
         """Get the vocab size based on the source"""
         return GPT2_VOCAB_SIZE
 

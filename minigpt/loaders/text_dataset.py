@@ -31,7 +31,7 @@ class TextDataset(BaseDataset):
         super().__init__(args)
 
     @classmethod
-    def get_vocab_size(cls, _source, _vocab_soure: str | None = None):
+    def get_vocab_size(cls, source, model_id):
         """Get the vocab size based on the source"""
         return NotImplementedError("Not implemented for text dataset")
 

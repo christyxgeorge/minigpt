@@ -28,13 +28,12 @@ class CommonConfig:
     work_dir: pathlib.PosixPath  # Working directory
     source: str
     model_id: str = "bg"  ## Model Version to use
-    vocab_source: str = "llama2"  # Tokenizer needs to be used for the tiny stories dataset
-    vocab_size: int = 0  # Needs to be initialized from the dataset
+    vocab_size: int = 0  # Needs to be initialized from the model
     verbose: bool = False
 
     def __post_init__(self):
         # Vocab_size and Vocab source
-        self.vocab_size = BaseDataset.get_vocab_size(self.source, self.vocab_source)
+        self.vocab_size = BaseDataset.get_vocab_size(self.source, self.model_id)
 
     @property
     def common_params(self) -> dict[str, Any]:
@@ -42,7 +41,6 @@ class CommonConfig:
             work_dir=self.work_dir,
             source=self.source,
             vocab_size=self.vocab_size,
-            vocab_source=self.vocab_source,
             model_id=self.model_id,
             verbose=self.verbose,
         )
@@ -105,7 +103,7 @@ class TrainerConfig(CommonConfig):
     resume: bool = False  # If we want to resume the previous training
     compile: bool = False  ## use PyTorch 2.0 to compile the model to be faster
     profile: bool = False  # TODO: use pytorch profiler, or just simple benchmarking?
-    log_interval: int = 40  # How often do we want to write to the training log
+    log_interval: int = 0  # How often do we want to write to the training log. 0 to disable
 
     def __post_init__(self):
         """Post Initialization defaults"""
@@ -223,7 +221,7 @@ class TrainerConfig(CommonConfig):
             if hasattr(self, key):
                 curr_value = getattr(self, key)
                 if master_process and curr_value != value:
-                    logger.info(f"Hyperparameter {key} Changed from {curr_value} to {value}")
+                    logger.info(f"Hyperparameter {key} changed from {curr_value} to {value}")
                 setattr(self, key, value)
 
     @staticmethod

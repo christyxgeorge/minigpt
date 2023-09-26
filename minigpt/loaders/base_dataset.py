@@ -25,6 +25,12 @@ LOADERS = {
 }
 DEFAULT_LOADER = "s_char"
 
+# Vocab Sizes:
+LLAMA2_VOCAB_SIZE = 32000  # the Llama 2 tokenizer has 32K tokens
+CUSTOM_VOCAB_SIZE = 2048
+# GPT-2 vocab_size of 50257, padded up to nearest multiple of 64 for efficiency
+GPT2_VOCAB_SIZE = 50304
+
 
 class BaseDataset(ABC):
     """Base dataset class for handling text data"""
@@ -37,7 +43,6 @@ class BaseDataset(ABC):
 
     def __init__(self, args):
         self.work_dir = args.work_dir
-        self.metadata_file = self.work_dir / "metadata.pkl"
         self.verbose = args.verbose
         self.prepared = self.is_prepared()
         if self.verbose:
@@ -47,12 +52,12 @@ class BaseDataset(ABC):
             )
 
     @classmethod
-    def get_vocab_size(cls, source, vocab_soure: str | None = None):
+    def get_vocab_size(cls, source, model_id):
         """Get the vocab size based on the source"""
         current_package = importlib.import_module(__package__)
         cls_name = LOADERS.get(source) or "TextDataset"
         cls = getattr(current_package, cls_name)
-        return cls.get_vocab_size(vocab_soure)
+        return cls.get_vocab_size(source, model_id)
 
     @staticmethod
     def default_loader():

@@ -4,7 +4,6 @@ import glob
 import json
 import logging
 import os
-import pickle  # nosec
 import random
 import tarfile
 import time
@@ -14,10 +13,17 @@ from pathlib import Path
 
 import numpy as np
 import sentencepiece as spm
+import tiktoken
 import torch
 import torch.distributed as dist
-from minigpt.loaders.base_dataset import BaseDataset
+from minigpt.loaders.base_dataset import (
+    CUSTOM_VOCAB_SIZE,
+    GPT2_VOCAB_SIZE,
+    LLAMA2_VOCAB_SIZE,
+    BaseDataset,
+)
 from minigpt.loaders.tokenizer import Tokenizer
+from minigpt.models.base_model import BaseLanguageModel
 from tqdm.auto import tqdm  # Choose tqdm or tqdm_notebook based on env
 
 logger = logging.getLogger(__name__)
@@ -26,33 +32,37 @@ NUM_DATA_FILES = 50
 # This is adapated from github/llama2.c/tinystories.py
 # https://github.com/karpathy/llama2.c/blob/master/tinystories.py
 
-# the Llama 2 tokenizer has 32K tokens
-LLAMA2_VOCAB_SIZE = 32000
-CUSTOM_VOCAB_SIZE = 2048
-
 
 class TinyStoriesData(BaseDataset):
     def __init__(self, args):
         self.iter_batches = {"train": None, "val": None}
         self.iter_val_batches = None
-        self.vocab_source = args.vocab_source  # llama2|custom;
-        if self.vocab_source == "llama2":
+        if args.model_id == "l2":
             self.vocab_size = LLAMA2_VOCAB_SIZE
-            # .bin files will be saved into llama2 directory, create it once here
-            self.bin_dir = args.work_dir / f"llama2"
+            self.tokenizer_path = "llama2"
+        elif args.model_id == "g2":
+            self.vocab_size = GPT2_VOCAB_SIZE
+            self.tokenizer_path = "gpt2"
         else:
             self.vocab_size = CUSTOM_VOCAB_SIZE
-            # .bin files will be saved into tok{N} directory, create it once here
-            self.bin_dir = args.work_dir / f"tok{self.vocab_size}"
+            self.tokenizer_path = f"tok{self.vocab_size}"
+
+        # .bin files will be saved into the tokenizer directory, create it once here
+        self.bin_dir = args.work_dir / self.tokenizer_path
         os.makedirs(self.bin_dir, exist_ok=True)
 
         # Setup internal variables before calling super().__init__()
         super().__init__(args)
 
     @classmethod
-    def get_vocab_size(cls, _source, vocab_source: str | None = None):
+    def get_vocab_size(cls, source, model_id):
         """Get the vocab size based on the source"""
-        return LLAMA2_VOCAB_SIZE if vocab_source == "llama2" else CUSTOM_VOCAB_SIZE
+        if model_id == "l2":
+            return LLAMA2_VOCAB_SIZE
+        elif model_id == "g2":
+            return GPT2_VOCAB_SIZE
+        else:
+            return CUSTOM_VOCAB_SIZE
 
     @property
     def name(self) -> str:
@@ -105,32 +115,34 @@ class TinyStoriesData(BaseDataset):
     def prepare(self, force=False):
         """Create train.bin and val.bin files"""
         self.download(force=force)  # Download the file, if not available
-        tokenizer_model = self.get_tokenizer_model_path(self.vocab_source)
-        if self.vocab_source == "llama2":
-            logger.info(f"Using Llama2 Tokenizer, No need to train vocab")
-        elif not os.path.exists(tokenizer_model):
-            self.train_vocab(self.vocab_size)
-        else:
-            logger.info(f"Tokenizer already trained: {tokenizer_model}, skipping")
-        self.enc = Tokenizer(tokenizer_model)
-        self.pretokenize(self.vocab_size)
+        model_path = str(self.work_dir / f"{self.tokenizer_path}.model")
+        if self.tokenizer_path.startswith("tok"):
+            if not os.path.exists(model_path):
+                self.train_vocab(self.vocab_size)
+            else:
+                logger.info(f"Tokenizer already trained: {model_path}, skipping")
+        self.pretokenize(model_path)
 
-        # store metadata
-        metadata = {"vocab_size": self.vocab_size, "vocab_source": self.vocab_source}
-        with open(self.metadata_file, "wb") as pklfile:
-            pickle.dump(metadata, pklfile, protocol=pickle.HIGHEST_PROTOCOL)
+        # We set self.enc after pre-tokenization because 'coreBPE' used by tiktoken
+        # cannot be pickled for multiprocessing/ProcessPoolExecutor
+        self.enc = self.get_encoder(model_path)
+
         return True
+
+    def get_encoder(self, model_path):
+        if self.tokenizer_path == "llama2":
+            enc = Tokenizer(model_path)
+        elif self.tokenizer_path == "gpt2":
+            enc = tiktoken.get_encoding("gpt2")
+        else:  # custom tokenizer (toknnnn)
+            enc = Tokenizer(model_path)
+        return enc
 
     def load_data(self):
         """Load Data from file"""
         if self.prepared:
-            # with open(self.metadata_file, "rb") as pklfile:
-            #     metadata = pickle.load(pklfile)  # nosec
-            metadata = {"vocab_size": self.vocab_size, "vocab_source": self.vocab_source}
-            self.vocab_source = metadata["vocab_source"]
-            self.vocab_size = metadata["vocab_size"]
-            tokenizer_model = self.get_tokenizer_model_path(self.vocab_source)
-            self.enc = Tokenizer(tokenizer_model)
+            model_path = str(self.work_dir / f"{self.tokenizer_path}.model")
+            self.enc = self.get_encoder(model_path)
         else:
             raise NotImplementedError("Load Data not supported. Use prepare first!")
 
@@ -150,7 +162,7 @@ class TinyStoriesData(BaseDataset):
             batch_size=cfg.batch_size,
             max_seq_len=cfg.block_size,
             vocab_size=self.vocab_size,
-            vocab_source=self.vocab_source,
+            tokenizer_path=self.tokenizer_path,
             bin_dir=self.bin_dir,
             device=cfg.device,
             num_workers=0,
@@ -222,28 +234,16 @@ class TinyStoriesData(BaseDataset):
             f"Trained tokenizer is in {prefix}.model, Time taken = {elapsed_time:.3f} secs"
         )
 
-    def get_tokenizer_model_path(self, vocab_source):
-        """
-        Returns path to the sentencepiece tokenizer model for a given vocab size
-        vocab_size = 0 designates the default Llama 2 tokenizer, in that case
-        None is returned.
-        """
-        return (
-            str(self.work_dir / f"llama2.model")
-            if vocab_source == "llama2"
-            else str(self.work_dir / f"tok{self.vocab_size}.model")
-        )
-
-    def pretokenize(self, vocab_size):
+    def pretokenize(self, model_path):
         # iterate the shards and tokenize all of them one by one
         start_time = time.time()
         data_dir = self.work_dir / "TinyStories_all_data"
         shard_filenames = sorted(glob.glob(os.path.join(data_dir, "*.json")))
-
         # process all the shards in a process pool
-        fun = partial(self.process_shard, vocab_size=vocab_size)
+        fun = partial(self.process_shard, model_path=model_path)
         with ProcessPoolExecutor() as executor:
-            executor.map(fun, enumerate(shard_filenames))
+            for result in executor.map(fun, enumerate(shard_filenames)):
+                pass # print(result)
         elapsed_time = time.time() - start_time
         logger.info(f"Pretokenization Done, Time taken = {elapsed_time:.3f} secs")
 
@@ -254,15 +254,15 @@ class TinyStoriesData(BaseDataset):
         file_exists = os.path.exists(tokenized_filename)
         return tokenized_filename, file_exists
 
-    def process_shard(self, args, vocab_size):
+    def process_shard(self, args, model_path):
         shard_id, shard = args
-
         # calculate the output filename and check if it exists
         tokenized_filename, file_exists = self.check_file(shard)
         if file_exists:
             logger.info(f"Already saved {tokenized_filename}, skipping..")
             return
 
+        enc = self.get_encoder(model_path)
         # Actually create tokens
         with open(shard, "r") as f:
             data = json.load(f)
@@ -270,7 +270,10 @@ class TinyStoriesData(BaseDataset):
         for example in tqdm(data, position=shard_id):
             text = example["story"]
             text = text.strip()  # get rid of leading/trailing whitespace
-            tokens = self.enc.encode(text, bos=True, eos=False)  # encode the text, use BOS
+            if self.tokenizer_path == "gpt2":
+                tokens = enc.encode_ordinary(text)
+            else:
+                tokens = enc.encode(text, bos=True, eos=False)  # encode the text, use BOS
             all_tokens.extend(tokens)
 
         # convert to uint16 nparray
@@ -301,12 +304,12 @@ class Task:
 class PretokDataset(torch.utils.data.IterableDataset):
     """Loads pretokenized examples from disk and yields them as PyTorch tensors."""
 
-    def __init__(self, split, max_seq_len, vocab_size, vocab_source, bin_dir):
+    def __init__(self, split, max_seq_len, vocab_size, tokenizer_path, bin_dir):
         super().__init__()
         self.split = split
         self.max_seq_len = max_seq_len
         self.vocab_size = vocab_size
-        self.vocab_source = vocab_source
+        self.tokenizer_path = tokenizer_path
         self.bin_dir = bin_dir
 
     def __iter__(self):
@@ -360,19 +363,13 @@ if __name__ == "__main__":
     """
     parser = argparse.ArgumentParser()
     parser.add_argument("stage", type=str, choices=["download", "pretokenize", "train_vocab"])
-    parser.add_argument(
-        "--vocab_size",
-        type=int,
-        default=0,
-        help="pretokenization vocab size. 0 = use Llama 2 tokenizer.",
-    )
     parser.add_argument("--work-dir", dest="work_dir")
     parser.add_argument("-v", "--verbose", action="store_true", default=False)
     parser.add_argument(
-        "--vocab-source",
-        choices=["llama2", "custom"],
-        default="llama2",
-        help="Build a custom tokenizer, or use llama2 tokenizer",
+        "-m",
+        "--model_id",
+        choices=BaseLanguageModel.models(),
+        default=BaseLanguageModel.default_model(),
     )
     args = parser.parse_args()
 
@@ -387,8 +384,8 @@ if __name__ == "__main__":
     if args.stage == "download":
         tiny_stories.download()
     elif args.stage == "train_vocab":
-        tiny_stories.train_vocab(vocab_size=args.vocab_size)
-    elif args.stage == "pretokenize":
-        tiny_stories.pretokenize(vocab_size=args.vocab_size)
+        tiny_stories.train_vocab(vocab_size=tiny_stories.vocab_size)
+    # elif args.stage == "pretokenize":
+    #     tiny_stories.pretokenize(vocab_size=tiny_stories.vocab_size)
     else:
         raise ValueError(f"Unknown stage {args.stage}")

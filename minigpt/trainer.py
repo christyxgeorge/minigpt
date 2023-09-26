@@ -178,7 +178,8 @@ class GPTTrainer:
 
         log_msg = f"step {iter:4d}: train loss = {xlosses['train']:.4f}, val loss = {xlosses['val']:.4f}{elapsed_str}"
         logger.info(log_msg)
-        xlogger.info(log_msg)
+        if self.cfg.verbose:
+            xlogger.info(log_msg)
 
         if eval_start_time:
             xlosses["eval_time"] = eval_time
@@ -219,13 +220,13 @@ class GPTTrainer:
                 "iter_num": iter,
                 "best_val_loss": val_loss,
                 "hparams": self.cfg.hparams,
-                "vocab_source": self.cfg.vocab_source,
                 "vocab_size": self.cfg.vocab_size,
             }
             checkpoint_dir = self.cfg.work_dir / "checkpoints"
             if self.cfg.verbose:
                 logger.info(f"Saving model checkpoint @ step {iter} to {checkpoint_dir}")
-            xlogger.info(f"Saving model checkpoint @ step {iter} to {checkpoint_dir}")
+            if self.cfg.verbose:
+                xlogger.info(f"Saving model checkpoint @ step {iter} to {checkpoint_dir}")
             checkpoint_dir.mkdir(parents=True, exist_ok=True)  # Create, if not exists.
             torch.save(checkpoint, checkpoint_dir / f"{model.name.lower()}.ckpt.pt")
 
@@ -280,12 +281,13 @@ class GPTTrainer:
         print(log_msg)
         print(f"Model Config: {self.cfg.dict()}")
         print("=" * 100)
-        xlogger.info(log_msg)
-        xlogger.info(f"Model Config: {self.cfg.dict()}")
         ddp_str = f"{self.cfg.world_size} devices" if self.cfg.use_ddp else "False"
-        log_msg = f"Training starts [Device = {self.cfg.device_type}, DDP: {ddp_str}, Scaler = {self.scaler.is_enabled()}]"
-        logger.info(log_msg)
-        xlogger.info(log_msg)
+        trg_msg = f"Training starts [Device = {self.cfg.device_type}, DDP: {ddp_str}, Scaler = {self.scaler.is_enabled()}]"
+        logger.info(trg_msg)
+        if self.cfg.verbose:
+            xlogger.info(log_msg)
+            xlogger.info(f"Model Config: {self.cfg.dict()}")
+            xlogger.info(trg_msg)
 
     def load_checkpoint(self):
         checkpoint_dir = self.cfg.work_dir / "checkpoints"
@@ -296,7 +298,6 @@ class GPTTrainer:
 
     def restore_model_state(self, checkpoint, optimizer):
         self.cfg.update_hparams(**checkpoint["hparams"])
-        self.cfg.vocab_source = checkpoint.get("vocab_source", "llama2")
         state_dict = checkpoint["model"]
         iterations = checkpoint["iter_num"]
         if iterations >= self.cfg.max_iters:
@@ -433,7 +434,7 @@ class GPTTrainer:
                     self.save_model(step, raw_model, optimizer, losses["val"])
                 # self.clear_memory() # Not needed
                 eval_start_time = time.time()
-            elif step > first_step and step % self.cfg.log_interval == 0:
+            elif step > first_step and self.cfg.log_interval and step % self.cfg.log_interval == 0:
                 if self.master_process and self.cfg.verbose:
                     xlogger.info(
                         f"Process [{self.cfg.local_rank}] Step {step}: Learning rate = {lr}"
@@ -465,7 +466,8 @@ class GPTTrainer:
                     f"flops {mflops_achieved:.4f} MFlops, running mflops = {running_mflops:.4f} MFlops"
                 )
                 logger.info(log_msg)
-                xlogger.info(log_msg)
+                if self.cfg.verbose:
+                    xlogger.info(log_msg)
             if self.cfg.eval_only:
                 break
         return step, eval_start_time
@@ -476,12 +478,14 @@ class GPTTrainer:
         print("=" * 100)
         if train_time < 60:
             logger.info(f"Time taken = {train_time:.3f} secs")
-            xlogger.info(f"Time taken = {train_time:.3f} secs")
+            if self.cfg.verbose:
+                xlogger.info(f"Time taken = {train_time:.3f} secs")
         else:
             mins = int(train_time // 60)
             secs = train_time % 60
             logger.info(f"Time taken = {train_time:.3f} secs - {mins} mins, {secs:.3f} secs")
-            xlogger.info(f"Time taken = {train_time:.3f} secs - {mins} mins, {secs:.3f} secs")
+            if self.cfg.verbose:
+                xlogger.info(f"Time taken = {train_time:.3f} secs - {mins} mins, {secs:.3f} secs")
 
     def train_single_step(self, model, optimizer) -> None:
         with record_function("get_batch"):
