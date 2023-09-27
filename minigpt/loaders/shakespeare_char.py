@@ -19,13 +19,6 @@ class TinyShakespeareCharData(TextDataset):
         """Return the dataset name"""
         return "Tiny Shakespeare (Character tokens)"
 
-    def is_prepared(self) -> bool:
-        """Check if the data(bin_files) have been prepared"""
-        bin_files_exist = (self.work_dir / self.train_bin).exists() and (
-            self.work_dir / self.val_bin
-        ).exists()
-        return bin_files_exist
-
     def download(self, force=False):
         # download the tiny shakespeare dataset
         # data_url = "https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt"

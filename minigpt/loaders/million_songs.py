@@ -22,13 +22,6 @@ class SpotifyMillionSongsData(TextDataset):
         """Return the dataset name"""
         return "Spotify Million Songs"
 
-    def is_prepared(self) -> bool:
-        """Check if the data(bin_files) have been prepared"""
-        bin_files_exist = (self.work_dir / self.train_bin).exists() and (
-            self.work_dir / self.val_bin
-        ).exists()
-        return bin_files_exist
-
     def download(self, force=False):
         # download the spotify million songs dataset (git lfs link)
         data_url = "https://media.githubusercontent.com/media/christyxgeorge/datasets/main/spotify_millsongdata.csv"

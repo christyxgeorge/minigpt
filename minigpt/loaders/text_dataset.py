@@ -35,14 +35,17 @@ class TextDataset(BaseDataset):
         """Get the vocab size based on the source"""
         return NotImplementedError("Not implemented for text dataset")
 
+    def is_prepared(self) -> bool:
+        """Check if the data(bin_files) have been prepared"""
+        bin_files_exist = (self.work_dir / self.train_bin).exists() and (
+            self.work_dir / self.val_bin
+        ).exists()
+        return bin_files_exist
+
     @property
     @abstractmethod
     def name(self) -> str:
         """Return the dataset name"""
-
-    @abstractmethod
-    def is_prepared(self) -> bool:
-        """Check if the data(bin_files) have been prepared"""
 
     @abstractmethod
     def get_token_ids(self) -> tuple[list[int], list[int]]:

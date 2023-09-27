@@ -243,7 +243,7 @@ class TinyStoriesData(BaseDataset):
         fun = partial(self.process_shard, model_path=model_path)
         with ProcessPoolExecutor() as executor:
             for result in executor.map(fun, enumerate(shard_filenames)):
-                pass # print(result)
+                pass  # print(result)
         elapsed_time = time.time() - start_time
         logger.info(f"Pretokenization Done, Time taken = {elapsed_time:.3f} secs")
 
