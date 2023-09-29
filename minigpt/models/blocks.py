@@ -9,9 +9,9 @@ class AttentionHead(nn.Module):
 
     def __init__(self, cfg, head_size):
         super().__init__()
-        self.key = nn.Linear(cfg.n_embed, head_size, bias=cfg.bias)
-        self.query = nn.Linear(cfg.n_embed, head_size, bias=cfg.bias)
-        self.value = nn.Linear(cfg.n_embed, head_size, bias=cfg.bias)
+        self.key = nn.Linear(cfg.n_embed, head_size, bias=cfg.bias)  # False in the video!
+        self.query = nn.Linear(cfg.n_embed, head_size, bias=cfg.bias)  # False in the video!
+        self.value = nn.Linear(cfg.n_embed, head_size, bias=cfg.bias)  # False in the video!
         self.register_buffer(
             "tril", torch.tril(torch.ones(cfg.block_size, cfg.block_size))
         )  ## T x T
@@ -21,7 +21,8 @@ class AttentionHead(nn.Module):
         k = self.key(x)  # B x T x head_size (hs)
         q = self.query(x)  # B x T x head_size (hs)
 
-        wei = q @ k.transpose(-2, -1) * C**-0.5  # Scaled attention
+        # Scaled attention
+        wei = q @ k.transpose(-2, -1) * k.size(-1) ** -0.5  # Scaled by head size
         wei = wei.masked_fill(self.tril[:T, :T] == 0, float("-inf"))
         wei = F.softmax(wei, dim=-1)
 
@@ -44,7 +45,7 @@ class MultiHeadAttention(nn.Module):
 
 
 class FeedForward(nn.Module):
-    """Positional Feed Forward"""
+    """Positional Feed Forward with RELU Activation"""
 
     def __init__(self, cfg):
         super().__init__()
@@ -56,7 +57,7 @@ class FeedForward(nn.Module):
 
 class FeedForwardDropout(nn.Module):
     """
-    Positional Feed Forward - With projection into the residual layer
+    Positional Feed Forward - With ReLU activation and projection into the residual layer
     And a dropout layer
     """
 
@@ -139,6 +140,10 @@ class LayerNorm1D:
     Layer Norm -- Adapted from the above BatchNorm1D
     Can see the difference between LayerNorm1D and BatchNorm1D
     For reference, Not used
+    Formula = (x - mean(x)) / (sqrt(var(x) + eps)) * gamma + beta
+    Does both re-centering (with the mean) and re-scaling (with the variance)
+    variance = pow(x - mean(x), 2) / n
+    Gamma, Beta are learnable parameters.
     """
 
     def __init__(self, dim, eps=1e-5):

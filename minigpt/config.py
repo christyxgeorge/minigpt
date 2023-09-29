@@ -62,7 +62,7 @@ class TrainerConfig(CommonConfig):
     n_layers: int = 4
     n_heads: int = 4
     dropout: float = 0.0  # for pretraining 0 is good, for finetuning try 0.1+
-    bias: bool = True
+    bias: bool = False  # By default, False (GPT2 uses bias=True)
 
     # settings for learning rate decay, gradient accumulation and max iterations
     learning_rate: float = 1e-3

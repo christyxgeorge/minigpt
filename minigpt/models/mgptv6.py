@@ -61,7 +61,7 @@ class MultiHeadAttentionDropOut(nn.Module):
         return out
 
 
-class ResidualTransformerBlockDropout(nn.Module):
+class TransformerBlock(nn.Module):
     """
     Transformer Block: Communication followed by Computation - With Residual Connections
     The layer norm we apply is called pre-norm. Slighly different from the original paper
@@ -89,9 +89,7 @@ class GPTLanguageModelv6(BaseLanguageModel):
         super().__init__(cfg)
         self.token_embedding_table = nn.Embedding(cfg.vocab_size, cfg.n_embed)
         self.position_embedding_table = nn.Embedding(cfg.block_size, cfg.n_embed)
-        self.blocks = nn.Sequential(
-            *[ResidualTransformerBlockDropout(cfg) for _ in range(cfg.n_layers)]
-        )
+        self.blocks = nn.Sequential(*[TransformerBlock(cfg) for _ in range(cfg.n_layers)])
         self.ln_f = nn.LayerNorm(cfg.n_embed)
         self.lm_head = nn.Linear(cfg.n_embed, cfg.vocab_size)
 

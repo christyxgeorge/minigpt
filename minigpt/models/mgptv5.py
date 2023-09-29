@@ -34,6 +34,7 @@ class FeedForwardProjection(nn.Module):
         self.net = nn.Sequential(
             nn.Linear(cfg.n_embed, 4 * cfg.n_embed),
             nn.ReLU(),
+            # Projection Layer back into the residual layer
             nn.Linear(4 * cfg.n_embed, cfg.n_embed),
         )
 
@@ -41,7 +42,7 @@ class FeedForwardProjection(nn.Module):
         return self.net(x)
 
 
-class ResidualTransformerBlockProjection(nn.Module):
+class TransformerBlock(nn.Module):
     """Transformer Block: Communication followed by Computation - With Residual Connections"""
 
     def __init__(self, cfg):
@@ -61,10 +62,10 @@ class GPTLanguageModelv5(BaseLanguageModel):
         self.token_embedding_table = nn.Embedding(cfg.vocab_size, cfg.n_embed)
         self.position_embedding_table = nn.Embedding(cfg.block_size, cfg.n_embed)
         self.blocks = nn.Sequential(
-            ResidualTransformerBlockProjection(cfg),
-            ResidualTransformerBlockProjection(cfg),
-            ResidualTransformerBlockProjection(cfg),
-            ResidualTransformerBlockProjection(cfg),
+            TransformerBlock(cfg),
+            TransformerBlock(cfg),
+            TransformerBlock(cfg),
+            # TransformerBlock(cfg),
         )
         self.lm_head = nn.Linear(cfg.n_embed, cfg.vocab_size)
 

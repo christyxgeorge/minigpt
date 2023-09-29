@@ -28,9 +28,19 @@ class Llama2ModelArgs:
     norm_eps: float = 1e-5
     block_size: int = 2048  # a.k.a max_seq_len
     decay_lr: bool = False
+    bias: bool = False
 
 
 class RMSNorm(torch.nn.Module):
+    """
+    Layer norm which focusses on rescaling and not recentering.
+    So, we dont use the variance and mean, but the RMS
+    RMS = sqrt(mean(x^2) + eps)
+    x = x / RMS * gamma
+    gamma is a learnable parameter
+    Advantages: less computational than LayerNorm, Works well!
+    """
+
     def __init__(self, dim: int, eps: float):
         super().__init__()
         self.eps = eps
@@ -107,9 +117,9 @@ class FeedForward(nn.Module):
             cfg.hidden_dim = cfg.multiple_of * (
                 (cfg.hidden_dim + cfg.multiple_of - 1) // cfg.multiple_of
             )
-        self.w1 = nn.Linear(cfg.n_embed, cfg.hidden_dim, bias=False)
-        self.w2 = nn.Linear(cfg.hidden_dim, cfg.n_embed, bias=False)
-        self.w3 = nn.Linear(cfg.n_embed, cfg.hidden_dim, bias=False)
+        self.w1 = nn.Linear(cfg.n_embed, cfg.hidden_dim, bias=cfg.bias)
+        self.w2 = nn.Linear(cfg.hidden_dim, cfg.n_embed, bias=cfg.bias)
+        self.w3 = nn.Linear(cfg.n_embed, cfg.hidden_dim, bias=cfg.bias)
         self.dropout = nn.Dropout(cfg.dropout)
 
     def forward(self, x):
@@ -123,21 +133,25 @@ class MultiHeadAttention(nn.Module):
         super().__init__()
 
         # TODO: ==== Why do we need this?
-        model_parallel_size = 1
-        self.n_local_heads = cfg.n_heads // model_parallel_size
-        self.n_local_kv_heads = cfg.n_kv_heads // model_parallel_size
-        self.n_rep = self.n_local_heads // self.n_local_kv_heads
-        self.head_dim = cfg.n_embed // cfg.n_heads
+        # model_parallel_size = 1
+        # self.n_local_heads = cfg.n_heads // model_parallel_size
+        # self.n_local_kv_heads = cfg.n_kv_heads // model_parallel_size
+        # self.n_rep = self.n_local_heads // self.n_local_kv_heads
+        # self.head_dim = cfg.n_embed // cfg.n_heads
+        # self.wq = nn.Linear(args.dim, args.n_heads * self.head_dim, bias=False)
+        # self.wk = nn.Linear(args.dim, self.n_kv_heads * self.head_dim, bias=False)
+        # self.wv = nn.Linear(args.dim, self.n_kv_heads * self.head_dim, bias=False)
+        # self.wo = nn.Linear(args.n_heads * self.head_dim, args.dim, bias=False)
         # TODO: ==== Why do we need this?
 
-        self.key = nn.Linear(cfg.n_embed, cfg.n_embed, bias=False)
-        self.query = nn.Linear(cfg.n_embed, cfg.n_embed, bias=False)
-        self.value = nn.Linear(cfg.n_embed, cfg.n_embed, bias=False)
+        self.key = nn.Linear(cfg.n_embed, cfg.n_embed, bias=cfg.bias)
+        self.query = nn.Linear(cfg.n_embed, cfg.n_embed, bias=cfg.bias)
+        self.value = nn.Linear(cfg.n_embed, cfg.n_embed, bias=cfg.bias)
 
         self.attention_dropout = nn.Dropout(cfg.dropout)
         self.residual_dropout = nn.Dropout(cfg.dropout)
 
-        self.proj = nn.Linear(cfg.n_embed, cfg.n_embed)  # Final Output Projection
+        self.wo = nn.Linear(cfg.n_embed, cfg.n_embed, bias=cfg.bias)  # Final Output Projection
 
         # Local Variables
         self.flash = hasattr(torch.nn.functional, "scaled_dot_product_attention")
@@ -199,7 +213,7 @@ class MultiHeadAttention(nn.Module):
         output = output.transpose(1, 2).contiguous().view(B, T, -1)
 
         # final projection into the residual stream
-        output = self.proj(output)
+        output = self.wo(output)
         output = self.residual_dropout(output)
         return output
 
@@ -227,13 +241,16 @@ class TransformerBlock(nn.Module):
 class Llama2LanguageModel(BaseLanguageModel):
     def __init__(self, cfg):
         super().__init__(cfg)
+        # Ensure that bias is False
+        cfg.update_hparams(bias=False)
+
         self.tok_embeddings = nn.Embedding(cfg.vocab_size, cfg.n_embed)
         self.dropout = nn.Dropout(cfg.dropout)
         self.layers = torch.nn.ModuleList()
         for layer_id in range(cfg.n_layers):
             self.layers.append(TransformerBlock(layer_id, cfg))
         self.norm = RMSNorm(cfg.n_embed, eps=cfg.norm_eps)
-        self.output = nn.Linear(cfg.n_embed, cfg.vocab_size, bias=False)
+        self.output = nn.Linear(cfg.n_embed, cfg.vocab_size, bias=cfg.bias)
 
         # share the unembedding parameters with the embedding parameters
         # https://paperswithcode.com/method/weight-tying
