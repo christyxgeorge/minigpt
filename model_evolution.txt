@@ -1,0 +1,72 @@
+
+bigram model
+[00:34:52.500 --> 00:34:54.500]   Okay, let's now train the model.
+[00:37:07.500 --> 00:37:11.500]   Okay, so we're down at about 2.5ish. Let's see what we get.
+    - Batch Size = 32, Block Size = 8
+    - LR = 1e-3
+    - Iterations = ~ 16000 iterations
+    - The final loss is 2.5769
+
+v2 - With a single attention head
+[01:21:25.500 --> 01:21:28.500]   So those are the changes, and let's now train the network.
+    - Batch Size = 32, Block Size = 8, Embed_Dim = 32
+    - Num Heads = 1, Head Size = 16
+    - Max_Iters = 5000, Eval Interval = 500, Eval Iters = 200, LR = 1e-3
+    - Bias for K, Q, V Linear Layer = False
+    - Loss = 2.4084
+
+v3 - Multiple Attention Heads
+[01:23:47.500 --> 01:23:51.500]   Now, I actually ran it and scrolling down.
+[01:23:51.500 --> 01:23:56.500]   I ran the same thing, and then we now get it down to 2.28, roughly.
+    - Batch Size = 32, Block Size = 8, Embed_Dim = 32
+    - Num Heads = 4, Head Size = 8
+    - Max_Iters = 5000, Eval Interval = 500, Eval Iters = 200, LR = 1e-3
+    - Bias for K, Q, V Linear Layer = False
+    - Loss = 2.2858
+
+v3 - Multiple Attention Heads with Feed Forward (Linear with ReLU)
+[01:26:19.500 --> 01:26:27.500]   Now, when I train this, the validation loss actually continues to go down, now to 2.24, which is down from 2.28.
+    - Batch Size = 32, Block Size = 8, Embed_Dim = 32
+    - Num Heads = 4, Head Size = 8
+    - Max_Iters = 5000, Eval Interval = 500, Eval Iters = 200, LR = 1e-3
+    - Bias for K, Q, V Linear Layer = False
+    - Loss = 2.2412
+
+v4 - With multiple transformer blocks
+[01:27:59.500 --> 01:28:05.500]   Now, actually try to run this, and the problem is this doesn't actually give a very good answer.
+[01:28:22.500 --> 01:28:27.500]   Now, there are two optimizations that dramatically help with the depth of these networks,
+    - Batch Size = 32, Block Size = 8, Embed_Dim = 32
+    - Num Heads = 4, Head Size = 8, Num Layers = 3 [Not Parametrized]
+    - Max_Iters = 5000, Eval Interval = 500, Eval Iters = 200, LR = 1e-3
+    - Bias for K, Q, V Linear Layer = False
+    - Loss = ???? [Not in the videp]
+
+v5 - With residual connections and projection.
+[01:32:22.500 --> 01:32:27.500]   And then I trained this and we actually get down all the way to 2.08 validation loss.
+    - Batch Size = 32, Block Size = 8, Embed_Dim = 32
+    - Num Heads = 4, Head Size = 8, Num Layers = 3 [Not Parametrized]
+    - FF Hidden Dimension = Embed_Dim * 4
+    - Max_Iters = 5000, Eval Interval = 500, Eval Iters = 200, LR = 1e-3
+    - Bias for K, Q, V Linear Layer = False
+    - Loss = 2.0808
+
+v6 - Pre-LayerNorm: Apply before the Self Attention, Feed Forward, LM_head
+[01:37:09.500 --> 01:37:14.500]   And we see that we get down to 2.06, which is better than the previous 2.08.
+    - Batch Size = 32, Block Size = 8, Embed_Dim = 32
+    - Num Heads = 4, Head Size = 8
+    - Num Layers = 3 [Not Parametrized] -- GPTv6 uses from cfg (value = 4).
+    - FF Hidden Dimension = Embed_Dim * 4
+    - Max_Iters = 5000, Eval Interval = 500, Eval Iters = 200, LR = 1e-3
+    - Bias for K, Q, V Linear Layer = False
+    - Loss = 2.0607
+
+v7 - With Dropout --> So that we can do scaling.
+    - Batch Size = 64, Block Size = 256, Embed_Dim = 384
+    - Num Heads = 6, Head Size = 384 / 6 = 64
+    - Num Layers = 6 [Now Parametrized]
+    - Dropout = 0.2
+    - FF Hidden Dimension = Embed_Dim * 4
+    - Max_Iters = 5000, Eval Interval = 500, Eval Iters = 200, LR = 3e-4
+    - Bias for K, Q, V Linear Layer = False
+    - Ran for around 15 mins on an A100 GPU!
+    - Losses = 1.0763 (Training), 1.4873 (Validation)

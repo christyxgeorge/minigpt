@@ -133,20 +133,20 @@ class MultiHeadAttention(nn.Module):
         super().__init__()
 
         # TODO: ==== Why do we need this?
-        # model_parallel_size = 1
-        # self.n_local_heads = cfg.n_heads // model_parallel_size
-        # self.n_local_kv_heads = cfg.n_kv_heads // model_parallel_size
-        # self.n_rep = self.n_local_heads // self.n_local_kv_heads
-        # self.head_dim = cfg.n_embed // cfg.n_heads
-        # self.wq = nn.Linear(args.dim, args.n_heads * self.head_dim, bias=False)
-        # self.wk = nn.Linear(args.dim, self.n_kv_heads * self.head_dim, bias=False)
-        # self.wv = nn.Linear(args.dim, self.n_kv_heads * self.head_dim, bias=False)
-        # self.wo = nn.Linear(args.n_heads * self.head_dim, args.dim, bias=False)
+        model_parallel_size = 1
+        self.n_local_heads = cfg.n_heads // model_parallel_size
+        self.n_local_kv_heads = cfg.n_kv_heads // model_parallel_size
+        self.n_rep = self.n_local_heads // self.n_local_kv_heads
+        self.head_dim = cfg.n_embed // cfg.n_heads
+        # self.wq = nn.Linear(cfg.n_embed, cfg.n_heads * self.head_dim, bias=cfg.bias)
+        # self.wk = nn.Linear(cfg.n_embed, cfg.n_kv_heads * self.head_dim, bias=cfg.bias)
+        # self.wv = nn.Linear(cfg.n_embed, cfg.n_kv_heads * self.head_dim, bias=cfg.bias)
+        # self.wo = nn.Linear(cfg.n_heads * self.head_dim, cfg.n_embed, bias=cfg.bias)
         # TODO: ==== Why do we need this?
 
-        self.key = nn.Linear(cfg.n_embed, cfg.n_embed, bias=cfg.bias)
-        self.query = nn.Linear(cfg.n_embed, cfg.n_embed, bias=cfg.bias)
-        self.value = nn.Linear(cfg.n_embed, cfg.n_embed, bias=cfg.bias)
+        self.wk = nn.Linear(cfg.n_embed, cfg.n_embed, bias=cfg.bias)
+        self.wq = nn.Linear(cfg.n_embed, cfg.n_embed, bias=cfg.bias)
+        self.wv = nn.Linear(cfg.n_embed, cfg.n_embed, bias=cfg.bias)
 
         self.attention_dropout = nn.Dropout(cfg.dropout)
         self.residual_dropout = nn.Dropout(cfg.dropout)
@@ -172,7 +172,7 @@ class MultiHeadAttention(nn.Module):
         freqs_sin: torch.Tensor,
     ):
         B, T, _ = x.shape
-        xq, xk, xv = self.query(x), self.key(x), self.value(x)
+        xq, xk, xv = self.wq(x), self.wk(x), self.wv(x)
 
         xq = xq.view(B, T, self.n_local_heads, self.head_dim)
         xk = xk.view(B, T, self.n_local_kv_heads, self.head_dim)
@@ -241,6 +241,7 @@ class TransformerBlock(nn.Module):
 class Llama2LanguageModel(BaseLanguageModel):
     def __init__(self, cfg):
         super().__init__(cfg)
+
         # Ensure that bias is False
         cfg.update_hparams(bias=False)
 
