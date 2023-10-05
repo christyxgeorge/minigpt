@@ -159,9 +159,6 @@ class BaseLanguageModel(nn.Module):
         else:
             idx = torch.zeros((1, 1), dtype=torch.long, device=self.cfg.device)
         tokens = self.generate(idx, num_tokens=num_tokens, temperature=temperature, top_k=top_k)
-        import pdb
-
-        pdb.set_trace()
         print(tdata.decode(tokens[0].tolist()))
         print("=" * 100)
 
